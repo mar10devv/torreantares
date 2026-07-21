@@ -1,0 +1,27 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Home from "../components/Home";
+
+// Le decimos a Astro que estas rutas existen y deben servir exactamente
+// lo mismo que "/" (el mismo Home.tsx). Así, al hacer F5 en /parrilleros,
+// /notas, etc., Astro ya no responde 404 — sirve la app normalmente.
+//
+// Si sumamos un módulo nuevo en Home.tsx (VISTA_A_PATH), hay que agregar
+// su slug acá también, si no, esa ruta puntual seguiría dando 404 al refrescar.
+export function getStaticPaths() {
+  return [
+    { params: { slug: "dashboard" } },
+    { params: { slug: "notas" } },
+    { params: { slug: "parrilleros" } },
+    { params: { slug: "ingresos" } },
+    { params: { slug: "cocheras" } },
+    { params: { slug: "ute" } },
+    { params: { slug: "administracion" } },
+    { params: { slug: "contactos" } },
+  ];
+}
+---
+
+<Layout>
+	<Home client:load />
+</Layout>

@@ -1,0 +1,31 @@
+{
+  "name": "proyectoantares",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/react": "^6.0.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "astro": "^7.1.0",
+    "clsx": "^2.1.1",
+    "firebase": "^12.16.0",
+    "lucide-react": "^1.24.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.5",
+    "prettier-plugin-astro": "^0.14.1"
+  }
+}
