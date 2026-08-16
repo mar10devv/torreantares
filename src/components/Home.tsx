@@ -10,6 +10,8 @@ import Cocheras from "./Cocheras";
 import Ute from "./Ute";
 import Administracion from "./Administracion";
 import Contactos from "./Contactos";
+import PropietariosInquilinos from "./PropietariosInquilinos";
+import IngresarPinModal from "./IngresarPinModal";
 import Loader from "./Loader";
 import logo from "../assets/logo.png";
 
@@ -29,7 +31,8 @@ type Vista =
   | "cocheras"
   | "ute"
   | "administracion"
-  | "contactos"; // acá se van sumando el resto
+  | "contactos"
+  | "residentes"; // Propietarios/Inquilinos — acá se van sumando el resto
 
 const STORAGE_KEY = "torreantares_usuarios";
 const SESION_KEY = "torreantares_sesion";
@@ -48,6 +51,7 @@ const VISTA_A_PATH: Record<Vista, string> = {
   ute: "/ute",
   administracion: "/administracion",
   contactos: "/contactos",
+  residentes: "/propietarios-inquilinos",
 };
 
 const PATH_A_VISTA: Partial<Record<string, Vista>> = Object.fromEntries(
@@ -63,6 +67,7 @@ const LOADER_MIN_MS = 700;
 export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [usuarioIntentandoLogin, setUsuarioIntentandoLogin] = useState<Usuario | null>(null);
 
   // Se restauran al cargar la página: el usuario desde sessionStorage
   // (sobrevive a un F5, se borra si cerrás la pestaña/navegador), y la
@@ -200,6 +205,17 @@ export default function Home() {
     setVista("dashboard");
   };
 
+  // Se llama al tocar una UserCard: en vez de entrar directo, primero
+  // pide el PIN. Solo si coincide (ver IngresarPinModal) se llama a handleLogin.
+  const handleIntentarLogin = (usuario: Usuario) => {
+    setUsuarioIntentandoLogin(usuario);
+  };
+
+  const handlePinCoincide = (usuario: Usuario) => {
+    setUsuarioIntentandoLogin(null);
+    handleLogin(usuario);
+  };
+
   const handleVolver = () => {
     setUsuarioActivo(null);
   };
@@ -214,6 +230,9 @@ export default function Home() {
     } else if (modulo === "Ingresos") {
       iniciarCarga("Cargando ingresos…");
       setVista("ingresos");
+    } else if (modulo === "Propietarios/Inquilinos") {
+      iniciarCarga("Cargando propietarios/inquilinos…");
+      setVista("residentes");
     } else if (modulo === "Cocheras") {
       iniciarCarga("Cargando cocheras…");
       setVista("cocheras");
@@ -265,6 +284,8 @@ export default function Home() {
           <Parrilleros usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
         ) : vista === "ingresos" ? (
           <Ingresos usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+        ) : vista === "residentes" ? (
+          <PropietariosInquilinos usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
         ) : vista === "cocheras" ? (
           <Cocheras usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
         ) : vista === "ute" ? (
@@ -312,7 +333,7 @@ export default function Home() {
                       usuario={usuario}
                       onEdit={() => handleEditUser(index)}
                       onDelete={() => handleDeleteUser(index)}
-                      onLogin={() => handleLogin(usuario)}
+                      onLogin={() => handleIntentarLogin(usuario)}
                     />
                   ))}
 
@@ -329,6 +350,12 @@ export default function Home() {
             onUserCreated={handleUserCreated}
             onUserUpdated={handleUserUpdated}
             usuarioEditando={editingIndex !== null ? usuarios[editingIndex] : null}
+          />
+
+          <IngresarPinModal
+            usuario={usuarioIntentandoLogin}
+            onClose={() => setUsuarioIntentandoLogin(null)}
+            onCoincide={handlePinCoincide}
           />
         </>
       )}

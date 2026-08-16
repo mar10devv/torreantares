@@ -153,7 +153,7 @@ export function buscarCochera(apartamento: string): Cochera | undefined {
 /* Vehículos registrados (persistidos en localStorage)          */
 /* ---------------------------------------------------------- */
 
-interface Vehiculo {
+export interface Vehiculo {
   id: string;
   tipo: "auto" | "moto";
   matricula: string; // normalizada: mayúsculas, sin espacios/guiones — para buscar
@@ -170,9 +170,28 @@ interface Vehiculo {
 
 const STORAGE_KEY_VEHICULOS = "torreantares_vehiculos";
 
+// Lectura/escritura exportadas para que otros módulos (como Ingresos) puedan
+// registrar o quitar vehículos sin duplicar la lógica de localStorage acá.
+export function leerVehiculos(): Vehiculo[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const guardado = localStorage.getItem(STORAGE_KEY_VEHICULOS);
+    return guardado ? JSON.parse(guardado) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function guardarVehiculos(lista: Vehiculo[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORAGE_KEY_VEHICULOS, JSON.stringify(lista));
+}
+
 // Marcas más comunes en Uruguay, para el autocompletado del campo "Marca".
 // Es una lista sugerida: el campo sigue aceptando cualquier texto libre.
-const MARCAS_AUTO = [
+// Se exportan para reutilizar el mismo autocompletado en otros formularios
+// (por ejemplo, el campo "Auto" del modal de Nuevo ingreso).
+export const MARCAS_AUTO = [
   "Volkswagen",
   "Chevrolet",
   "Toyota",
@@ -203,7 +222,7 @@ const MARCAS_AUTO = [
   "Land Rover",
 ];
 
-const MARCAS_MOTO = [
+export const MARCAS_MOTO = [
   "Yamaha",
   "Honda",
   "Suzuki",
@@ -230,7 +249,7 @@ function generarId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function normalizarMatricula(matricula: string) {
+export function normalizarMatricula(matricula: string) {
   return matricula.trim().toUpperCase().replace(/[\s-]/g, "");
 }
 
@@ -498,10 +517,11 @@ function normalizarTextoSimple(texto: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-// Autocompletado propio para el campo "Marca": reemplaza al <datalist> nativo
+// Autocompletado propio para campos de "Marca": reemplaza al <datalist> nativo
 // porque ese lo dibuja el navegador como un panel aparte que no respeta el
-// tamaño del modal. Este desplegable queda contenido dentro del modal.
-function MarcaInput({
+// tamaño del contenedor. Este desplegable queda contenido donde se use.
+// Exportado para reutilizarlo en otros formularios (ej: Ingresos → "Auto").
+export function MarcaInput({
   value,
   onChange,
   marcas,
@@ -527,7 +547,7 @@ function MarcaInput({
         onFocus={() => setAbierto(true)}
         onBlur={() => setTimeout(() => setAbierto(false), 120)}
         placeholder="Ej: Volkswagen"
-        className={inputClass}
+        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
       />
       {abierto && sugerencias.length > 0 && (
         <ul className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded-lg border border-white/10 bg-[#1c2028] shadow-xl">

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { X, Check, Zap, CarFront, TriangleAlert } from "lucide-react";
 import type { Ingreso, Ocupacion, NuevoIngresoData } from "./Ingresos";
 import { PRECIO_UTE } from "./Ingresos";
-import { buscarCochera, UBICACION_LABEL, MENSAJE_SIN_COCHERA } from "./Cocheras";
+import { buscarCochera, UBICACION_LABEL, MENSAJE_SIN_COCHERA, MarcaInput, MARCAS_AUTO } from "./Cocheras";
 import type { Cochera } from "./Cocheras";
 import {
   buscarContadorUte,
@@ -32,6 +32,12 @@ function formatearImporte(valor: number) {
   });
 }
 
+function formatearFechaCorta(fecha: string) {
+  const [anio, mes, dia] = fecha.split("-").map(Number);
+  const d = new Date(anio, mes - 1, dia);
+  return d.toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 const inputClass =
   "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500";
 const labelClass = "mb-1 block text-xs font-medium text-gray-400";
@@ -43,7 +49,7 @@ function AvisoCochera({ apartamento }: { apartamento: string }) {
 
   if (cochera) {
     return (
-      <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-300">
+      <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5 text-xs leading-relaxed text-emerald-300">
         <CarFront size={14} className="mt-0.5 shrink-0" />
         <span>
           Debe usar la cochera <span className="font-semibold">{cochera.numeroCochera}</span> ·{" "}
@@ -54,9 +60,9 @@ function AvisoCochera({ apartamento }: { apartamento: string }) {
   }
 
   return (
-    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-300">
+    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2.5 text-xs leading-relaxed text-amber-300">
       <TriangleAlert size={14} className="mt-0.5 shrink-0" />
-      <span>{MENSAJE_SIN_COCHERA}</span>
+      <span className="font-medium">{MENSAJE_SIN_COCHERA}</span>
     </div>
   );
 }
@@ -109,6 +115,44 @@ function AvisoUte({ apartamento }: { apartamento: string }) {
 }
 
 /* ---------------------------------------------------------- */
+/* Aviso: el depto ya tiene un ingreso activo                   */
+/* ---------------------------------------------------------- */
+
+function AvisoDeptoOcupadoModal({ ingreso, onClose }: { ingreso: Ingreso; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+          <TriangleAlert size={22} />
+        </div>
+
+        <h2 className="mt-4 text-lg font-bold text-white">Depto {ingreso.apartamento} ocupado</h2>
+        <p className="mt-2 text-sm text-gray-300">
+          Este depto está siendo ocupado por <span className="font-semibold text-white">{ingreso.nombre}</span>. El
+          ingreso sigue vigente (hasta el {formatearFechaCorta(ingreso.fechaSalida)}).
+        </p>
+        <p className="mt-2 text-sm text-gray-300">
+          Si esa persona ya se retiró, por favor finalizá ese ingreso primero y después volvé a intentarlo acá.
+        </p>
+
+        <button
+          onClick={onClose}
+          className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- */
 /* Nuevo ingreso                                                */
 /* ---------------------------------------------------------- */
 
@@ -116,6 +160,7 @@ interface NewIngresoModalProps {
   isOpen: boolean;
   onClose: () => void;
   usuario: Usuario;
+  ingresos: Ingreso[];
   onCrear: (datos: NuevoIngresoData) => void;
 }
 
@@ -136,33 +181,88 @@ const ESTADO_INICIAL = {
   matricula: "",
 };
 
-export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngresoModalProps) {
+export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }: NewIngresoModalProps) {
   const [form, setForm] = useState(ESTADO_INICIAL);
   const [tomaConsumoUte, setTomaConsumoUte] = useState(false);
+  const [tieneAuto, setTieneAuto] = useState(false);
+  const [ingresoOcupante, setIngresoOcupante] = useState<Ingreso | null>(null);
 
   if (!isOpen) return null;
 
   const set = (campo: keyof typeof ESTADO_INICIAL, valor: string) =>
     setForm((prev) => ({ ...prev, [campo]: valor }));
 
+  // Estilo de un campo obligatorio: se pone verde apenas se completa, para
+  // dar feedback visual de qué falta y qué ya está listo.
+  const campoClass = (valor: string) =>
+    `w-full rounded-lg border px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500 ${
+      valor.trim() !== "" ? "border-emerald-500/40 bg-emerald-500/[0.05]" : "border-white/10 bg-white/5"
+    }`;
+
+  // Todos los campos son obligatorios EXCEPTO auto/matrícula (no todos los
+  // inquilinos tienen auto) y la lectura de UTE (se puede cargar después).
+  const formCompleto =
+    form.fechaIngreso.trim() !== "" &&
+    form.fechaSalida.trim() !== "" &&
+    form.nombre.trim() !== "" &&
+    form.documento.trim() !== "" &&
+    form.domicilio.trim() !== "" &&
+    form.codigoPostal.trim() !== "" &&
+    form.ciudad.trim() !== "" &&
+    form.email.trim() !== "" &&
+    form.telefono.trim() !== "" &&
+    form.apartamento.trim() !== "";
+
   const handleClose = () => {
     setForm(ESTADO_INICIAL);
     setTomaConsumoUte(false);
+    setTieneAuto(false);
+    setIngresoOcupante(null);
     onClose();
+  };
+
+  // Se dispara al salir del campo "Apartamento": si ese depto ya tiene un
+  // ingreso activo (sin finalizar ni cancelar), avisamos antes de que sigan
+  // completando el resto del formulario. No bloquea la edición — es un
+  // aviso, el bloqueo real pasa recién al confirmar (en Ingresos.tsx).
+  const handleBlurApartamento = () => {
+    const valor = form.apartamento.trim();
+    if (!valor) return;
+
+    const activo = ingresos.find((i) => i.apartamento === valor && !i.finalizado && !i.cancelado);
+    if (activo) setIngresoOcupante(activo);
   };
 
   const handleSubmit = () => {
     const faltantes: string[] = [];
     if (!form.nombre.trim()) faltantes.push("Nombre y apellido");
     if (!form.documento.trim()) faltantes.push("Documento de identidad");
+    if (!form.domicilio.trim()) faltantes.push("Domicilio");
+    if (!form.codigoPostal.trim()) faltantes.push("Código postal");
+    if (!form.ciudad.trim()) faltantes.push("Ciudad");
+    if (!form.email.trim()) faltantes.push("Email");
+    if (!form.telefono.trim()) faltantes.push("Teléfono");
     if (!form.apartamento.trim()) faltantes.push("Apartamento");
     if (!form.fechaIngreso) faltantes.push("Fecha de ingreso");
     if (!form.fechaSalida) faltantes.push("Fecha de salida");
-    // La lectura de UTE ya NO es obligatoria: si se marcó el check pero no se
+    // Auto/matrícula quedan siempre opcionales (no todos tienen auto), y la
+    // lectura de UTE ya NO es obligatoria: si se marcó el check pero no se
     // cargó, se guarda igual y se pide después (modal de "falta la lectura").
 
     if (faltantes.length > 0) {
       window.alert(`Faltan completar los siguientes datos obligatorios:\n\n${faltantes.join("\n")}`);
+      return;
+    }
+
+    // Chequeo de depto ocupado también acá (no solo al salir del campo con
+    // onBlur): si alguien nunca perdió el foco de "Apartamento" o pegó el
+    // valor de otra forma, este es el control que realmente frena la carga,
+    // mostrando el mismo modal en vez de fallar en silencio.
+    const activo = ingresos.find(
+      (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
+    );
+    if (activo) {
+      setIngresoOcupante(activo);
       return;
     }
 
@@ -182,13 +282,15 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
       tomaConsumoUte,
       lecturaUteEntrada: tomaConsumoUte && tieneLecturaValida ? Number(form.lecturaUteEntrada) : undefined,
       ocupacion: form.ocupacion,
-      auto: form.auto.trim() || undefined,
-      matricula: form.matricula.trim() || undefined,
+      auto: tieneAuto ? form.auto.trim() || undefined : undefined,
+      matricula: tieneAuto ? form.matricula.trim() || undefined : undefined,
     };
 
     onCrear(datos);
     setForm(ESTADO_INICIAL);
     setTomaConsumoUte(false);
+    setTieneAuto(false);
+    setIngresoOcupante(null);
   };
 
   return (
@@ -216,7 +318,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
                 type="date"
                 value={form.fechaIngreso}
                 onChange={(e) => set("fechaIngreso", e.target.value)}
-                className={inputClass}
+                className={campoClass(form.fechaIngreso)}
               />
             </div>
             <div>
@@ -225,7 +327,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
                 type="date"
                 value={form.fechaSalida}
                 onChange={(e) => set("fechaSalida", e.target.value)}
-                className={inputClass}
+                className={campoClass(form.fechaSalida)}
               />
             </div>
           </div>
@@ -238,7 +340,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
               value={form.nombre}
               onChange={(e) => set("nombre", e.target.value)}
               placeholder="Nombre completo"
-              className={inputClass}
+              className={campoClass(form.nombre)}
             />
           </div>
 
@@ -249,7 +351,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
               value={form.documento}
               onChange={(e) => set("documento", e.target.value)}
               placeholder="CI / Pasaporte"
-              className={inputClass}
+              className={campoClass(form.documento)}
             />
           </div>
 
@@ -260,7 +362,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
               value={form.domicilio}
               onChange={(e) => set("domicilio", e.target.value)}
               placeholder="Calle y número"
-              className={inputClass}
+              className={campoClass(form.domicilio)}
             />
           </div>
 
@@ -271,7 +373,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
                 type="text"
                 value={form.codigoPostal}
                 onChange={(e) => set("codigoPostal", e.target.value)}
-                className={inputClass}
+                className={campoClass(form.codigoPostal)}
               />
             </div>
             <div>
@@ -280,7 +382,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
                 type="text"
                 value={form.ciudad}
                 onChange={(e) => set("ciudad", e.target.value)}
-                className={inputClass}
+                className={campoClass(form.ciudad)}
               />
             </div>
           </div>
@@ -292,7 +394,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
                 type="email"
                 value={form.email}
                 onChange={(e) => set("email", e.target.value)}
-                className={inputClass}
+                className={campoClass(form.email)}
               />
             </div>
             <div>
@@ -301,34 +403,37 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
                 type="text"
                 value={form.telefono}
                 onChange={(e) => set("telefono", e.target.value)}
-                className={inputClass}
+                className={campoClass(form.telefono)}
               />
             </div>
           </div>
 
           {/* Apartamento y ocupación */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Apartamento</label>
-              <input
-                type="text"
-                value={form.apartamento}
-                onChange={(e) => set("apartamento", e.target.value)}
-                placeholder="N.º de depto"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Ocupación</label>
-              <select
-                value={form.ocupacion}
-                onChange={(e) => set("ocupacion", e.target.value)}
-                className={inputClass}
-              >
-                <option value="inquilino">Inquilino</option>
-                <option value="invitado">Invitado</option>
-                <option value="propietario">Propietario</option>
-              </select>
+          <div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Apartamento</label>
+                <input
+                  type="text"
+                  value={form.apartamento}
+                  onChange={(e) => set("apartamento", e.target.value)}
+                  onBlur={handleBlurApartamento}
+                  placeholder="N.º de depto"
+                  className={campoClass(form.apartamento)}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Ocupación</label>
+                <select
+                  value={form.ocupacion}
+                  onChange={(e) => set("ocupacion", e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="inquilino" className="bg-white text-black">Inquilino</option>
+                  <option value="invitado" className="bg-white text-black">Invitado</option>
+                  <option value="propietario" className="bg-white text-black">Propietario</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -367,32 +472,39 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
             )}
           </div>
 
-          {/* Auto */}
-          <div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelClass}>Auto (opcional)</label>
-                <input
-                  type="text"
-                  value={form.auto}
-                  onChange={(e) => set("auto", e.target.value)}
-                  placeholder="Marca / modelo"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Matrícula (opcional)</label>
-                <input
-                  type="text"
-                  value={form.matricula}
-                  onChange={(e) => set("matricula", e.target.value)}
-                  className={inputClass}
-                />
-              </div>
-            </div>
+          {/* Auto: detrás de un toggle, así el aviso de cochera solo aparece
+              si el inquilino realmente tiene auto (no todos tienen). */}
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
+            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-white">
+              <input
+                type="checkbox"
+                checked={tieneAuto}
+                onChange={(e) => setTieneAuto(e.target.checked)}
+                className="h-4 w-4 rounded border-white/20 bg-white/10 accent-blue-600"
+              />
+              Tiene auto
+            </label>
 
-            {form.auto.trim() !== "" && form.apartamento.trim() !== "" && (
-              <AvisoCochera apartamento={form.apartamento} />
+            {tieneAuto && (
+              <div className="mt-3 flex flex-col gap-1">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelClass}>Auto (opcional)</label>
+                    <MarcaInput value={form.auto} onChange={(v) => set("auto", v)} marcas={MARCAS_AUTO} />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Matrícula (opcional)</label>
+                    <input
+                      type="text"
+                      value={form.matricula}
+                      onChange={(e) => set("matricula", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+
+                {form.apartamento.trim() !== "" && <AvisoCochera apartamento={form.apartamento} />}
+              </div>
             )}
           </div>
 
@@ -409,7 +521,8 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
             </button>
             <button
               onClick={handleSubmit}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+              disabled={!formCompleto}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-gray-500 disabled:hover:bg-white/10"
             >
               <Check size={16} />
               Confirmar ingreso
@@ -417,6 +530,10 @@ export function NewIngresoModal({ isOpen, onClose, usuario, onCrear }: NewIngres
           </div>
         </div>
       </div>
+
+      {ingresoOcupante && (
+        <AvisoDeptoOcupadoModal ingreso={ingresoOcupante} onClose={() => setIngresoOcupante(null)} />
+      )}
     </div>
   );
 }

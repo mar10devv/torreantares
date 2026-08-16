@@ -18,6 +18,7 @@ interface NoteCardProps {
   nota: Nota;
   onAddComment: (contenido: string) => void;
   formatearFecha: (iso: string) => string;
+  esNueva?: boolean;
 }
 
 // Genera un color de acento estable a partir del nombre, así cada persona
@@ -51,31 +52,41 @@ function Avatar({ nombre, tamano = "sm" }: { nombre: string; tamano?: "sm" | "xs
   );
 }
 
-// Detecta si la nota fue generada automáticamente desde una cancelación
-// (Parrilleros o Ingresos) y separa el prefijo fijo del motivo, para poder
-// destacar solo el prefijo con un fondo de color.
-const PREFIJO_CANCELACION = /^(Cancela (?:parrillero unidad|ingreso depto)[^:]*:)\s*([\s\S]*)$/;
+// Detecta si la nota fue generada automáticamente (cancelación o ingreso
+// nuevo) y separa el prefijo fijo del resto, para poder destacar solo el
+// prefijo con un fondo de color: rojo para cancelaciones, verde para
+// ingresos nuevos. Se prueba cada patrón en orden y se usa el primero que
+// matchee.
+const PREFIJOS_DESTACADOS: { regex: RegExp; color: "red" | "emerald" }[] = [
+  { regex: /^(Cancela (?:parrillero unidad|ingreso depto)[^:]*:)\s*([\s\S]*)$/, color: "red" },
+  { regex: /^(Nuevo ingreso depto[^:]*:)\s*([\s\S]*)$/, color: "emerald" },
+];
+
+const COLOR_CLASSES: Record<"red" | "emerald", string> = {
+  red: "bg-red-500/20 text-red-300",
+  emerald: "bg-emerald-500/20 text-emerald-300",
+};
 
 function ContenidoNota({ contenido }: { contenido: string }) {
-  const match = contenido.match(PREFIJO_CANCELACION);
+  for (const { regex, color } of PREFIJOS_DESTACADOS) {
+    const match = contenido.match(regex);
+    if (!match) continue;
 
-  if (!match) {
-    return <p className="text-[15px] leading-snug text-white">{contenido}</p>;
+    const [, prefijo, resto] = match;
+    return (
+      <p className="text-[17px] font-semibold leading-snug text-white">
+        <span className={`mr-1.5 inline-block rounded-md px-2 py-0.5 font-semibold ${COLOR_CLASSES[color]}`}>
+          {prefijo}
+        </span>
+        {resto}
+      </p>
+    );
   }
 
-  const [, prefijo, motivo] = match;
-
-  return (
-    <p className="text-[15px] leading-snug text-white">
-      <span className="mr-1.5 inline-block rounded-md bg-red-500/20 px-2 py-0.5 font-semibold text-red-300">
-        {prefijo}
-      </span>
-      {motivo}
-    </p>
-  );
+  return <p className="text-[17px] font-semibold leading-snug text-white">{contenido}</p>;
 }
 
-export default function NoteCard({ nota, onAddComment, formatearFecha }: NoteCardProps) {
+export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }: NoteCardProps) {
   const [comentario, setComentario] = useState("");
   const [mostrarInput, setMostrarInput] = useState(false);
 
@@ -93,14 +104,27 @@ export default function NoteCard({ nota, onAddComment, formatearFecha }: NoteCar
   };
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-5 shadow-xl backdrop-blur-2xl">
+    <div
+      className={`rounded-2xl border p-5 shadow-xl backdrop-blur-2xl transition-colors ${
+        esNueva ? "border-blue-500/40 bg-blue-500/[0.06]" : "border-white/10 bg-white/[0.06]"
+      }`}
+    >
 
       {/* Nota principal */}
       <div className="flex gap-3">
         <Avatar nombre={nota.autor} tamano="sm" />
         <div className="min-w-0 flex-1">
-          <ContenidoNota contenido={nota.contenido} />
-          <p className="mt-1.5 text-xs text-gray-400">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <ContenidoNota contenido={nota.contenido} />
+            </div>
+            {esNueva && (
+              <span className="mt-0.5 shrink-0 whitespace-nowrap rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
+                Nuevo
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
             <span className="font-medium text-gray-300">{nota.autor}</span> · {formatearFecha(nota.fecha)}
           </p>
         </div>

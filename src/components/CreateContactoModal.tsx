@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, Check } from "lucide-react";
-import type { NuevoContactoData } from "./Contactos";
+import type { Contacto, NuevoContactoData } from "./Contactos";
 
 interface Usuario {
   nombre: string;
@@ -15,6 +15,8 @@ interface CreateContactoModalProps {
   onClose: () => void;
   usuario: Usuario;
   onCrear: (datos: NuevoContactoData) => void;
+  /** Si viene, el modal precarga estos datos y pasa a modo edición. */
+  contactoInicial?: Contacto | null;
 }
 
 const inputClass =
@@ -29,8 +31,25 @@ const ESTADO_INICIAL = {
   telefono: "",
 };
 
-export default function CreateContactoModal({ isOpen, onClose, onCrear }: CreateContactoModalProps) {
-  const [form, setForm] = useState(ESTADO_INICIAL);
+export default function CreateContactoModal({
+  isOpen,
+  onClose,
+  onCrear,
+  contactoInicial,
+}: CreateContactoModalProps) {
+  const esEdicion = !!contactoInicial;
+
+  const [form, setForm] = useState(() =>
+    contactoInicial
+      ? {
+          nombre: contactoInicial.nombre,
+          apellido: contactoInicial.apellido,
+          apartamento: contactoInicial.apartamento ?? "",
+          email: contactoInicial.email,
+          telefono: contactoInicial.telefono,
+        }
+      : ESTADO_INICIAL
+  );
 
   if (!isOpen) return null;
 
@@ -76,7 +95,7 @@ export default function CreateContactoModal({ isOpen, onClose, onCrear }: Create
         className="w-full max-w-md rounded-3xl border border-white/10 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
       >
         <div className="mb-6 flex items-start justify-between">
-          <h2 className="text-xl font-bold text-white">Nuevo contacto</h2>
+          <h2 className="text-xl font-bold text-white">{esEdicion ? "Editar contacto" : "Nuevo contacto"}</h2>
           <button onClick={handleClose} className="rounded-full p-2 transition hover:bg-white/10">
             <X className="text-white" size={20} />
           </button>
@@ -154,7 +173,7 @@ export default function CreateContactoModal({ isOpen, onClose, onCrear }: Create
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
             >
               <Check size={16} />
-              Guardar contacto
+              {esEdicion ? "Guardar cambios" : "Guardar contacto"}
             </button>
           </div>
         </div>

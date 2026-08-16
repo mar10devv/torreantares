@@ -332,6 +332,7 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
           onClose={() => setDiaSeleccionado(null)}
           fecha={diaSeleccionado}
           ubicacion={ubicacion}
+          onCambiarUbicacion={setUbicacion}
           reservasDelDia={reservasDelDiaSeleccionado}
           usuario={usuario}
           onReservar={handleReservar}

@@ -70,6 +70,11 @@ export default function CreateUserModal({
     onClose();
   };
 
+  // El PIN solo acepta dígitos y se corta a 4 caracteres.
+  const handlePinChange = (valor: string) => {
+    setContrasena(valor.replace(/\D/g, "").slice(0, 4));
+  };
+
   const handleGuardar = async () => {
     if (!nombre.trim() || !cargo.trim() || !gmail.trim() || !telefono.trim() || !contrasena.trim()) {
       setError("Todos los campos son obligatorios.");
@@ -79,6 +84,11 @@ export default function CreateUserModal({
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(gmail)) {
       setError("Ingresá un correo válido.");
+      return;
+    }
+
+    if (!/^\d{1,4}$/.test(contrasena)) {
+      setError("El PIN debe tener solo números, máximo 4 dígitos.");
       return;
     }
 
@@ -199,15 +209,19 @@ export default function CreateUserModal({
 
           <div>
             <label className="mb-2 block text-sm text-gray-300">
-              Contraseña <span className="text-red-500">*</span>
+              PIN (máximo 4 dígitos) <span className="text-red-500">*</span>
             </label>
 
             <input
               type="password"
+              inputMode="numeric"
+              autoComplete="off"
               required
               value={contrasena}
-              onChange={(e) => setContrasena(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+              onChange={(e) => handlePinChange(e.target.value)}
+              maxLength={4}
+              placeholder="••••"
+              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-center text-lg tracking-[0.5em] text-white outline-none transition focus:outline-2 focus:outline-blue-500"
             />
           </div>
 

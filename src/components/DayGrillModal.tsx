@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Check, Ban, CircleDollarSign } from "lucide-react";
+import { X, Check, Ban, CircleDollarSign, Sun, Moon, Clock } from "lucide-react";
 
 export type Turno = "mediodia" | "noche";
 export type Ubicacion = "interior" | "exterior";
@@ -42,6 +42,8 @@ interface DayGrillModalProps {
   onClose: () => void;
   fecha: string; // YYYY-MM-DD
   ubicacion: Ubicacion;
+  /** Se llama cuando el usuario cambia Adentro/Afuera desde adentro del modal. */
+  onCambiarUbicacion?: (ubicacion: Ubicacion) => void;
   reservasDelDia: ReservaParrillero[];
   usuario: Usuario;
   onReservar: (
@@ -56,9 +58,14 @@ interface DayGrillModalProps {
   onCancelar: (id: string, motivo: string) => void;
 }
 
-const TURNOS: { key: Turno; label: string }[] = [
-  { key: "mediodia", label: "Día" },
-  { key: "noche", label: "Noche" },
+const UBICACIONES: { key: Ubicacion; label: string }[] = [
+  { key: "interior", label: "Adentro" },
+  { key: "exterior", label: "Afuera" },
+];
+
+const TURNOS: { key: Turno; label: string; Icon: typeof Sun }[] = [
+  { key: "mediodia", label: "Día", Icon: Sun },
+  { key: "noche", label: "Noche", Icon: Moon },
 ];
 
 function obtenerTemporada(fecha: string): "verano" | "invierno" {
@@ -434,6 +441,7 @@ export default function DayGrillModal({
   onClose,
   fecha,
   ubicacion,
+  onCambiarUbicacion,
   reservasDelDia,
   usuario,
   onReservar,
@@ -458,6 +466,19 @@ export default function DayGrillModal({
     setParrilleroSeleccionado(null);
   };
 
+  const handleCambiarUbicacion = (nuevaUbicacion: Ubicacion) => {
+    if (nuevaUbicacion === ubicacion) return;
+    if (!onCambiarUbicacion) {
+      // Todavía no está conectado el prop en Parrilleros.tsx.
+      console.warn(
+        "DayGrillModal: falta pasar el prop 'onCambiarUbicacion' desde Parrilleros.tsx para que este botón funcione."
+      );
+      return;
+    }
+    onCambiarUbicacion(nuevaUbicacion);
+    setParrilleroSeleccionado(null);
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md"
@@ -467,13 +488,17 @@ export default function DayGrillModal({
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
       >
-        <div className="mb-5 flex items-start justify-between">
+        <div className="mb-6 flex items-start justify-between">
           <div>
             <h2 className="text-xl font-bold capitalize text-white">
               {formatearFechaTitulo(fecha)}
             </h2>
-            <p className="mt-1 text-xs capitalize text-gray-500">
-              {ubicacion === "interior" ? "Adentro" : "Afuera"} · {formatearImporte(precio)}
+            <p className="mt-1.5 flex items-center gap-2 text-sm">
+              <span className="font-medium capitalize text-gray-300">
+                {ubicacion === "interior" ? "Adentro" : "Afuera"}
+              </span>
+              <span className="text-gray-600">·</span>
+              <span className="font-semibold text-emerald-400">{formatearImporte(precio)}</span>
             </p>
           </div>
 
@@ -485,22 +510,42 @@ export default function DayGrillModal({
           </button>
         </div>
 
+        {/* Selector Adentro / Afuera */}
+        <div className="mb-3 flex rounded-xl border border-white/10 bg-white/5 p-1">
+          {UBICACIONES.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => handleCambiarUbicacion(key)}
+              className={`flex-1 rounded-lg px-5 py-2 text-sm font-medium transition ${
+                ubicacion === key ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* Selector Día / Noche */}
-        <div className="mb-6 flex flex-col gap-2">
-          <div className="flex rounded-xl border border-white/10 bg-white/5 p-1">
-            {TURNOS.map(({ key, label }) => (
+        <div className="mb-6 flex flex-col items-center gap-3">
+          <div className="flex w-full rounded-xl border border-white/10 bg-white/5 p-1">
+            {TURNOS.map(({ key, label, Icon }) => (
               <button
                 key={key}
                 onClick={() => handleCambiarTurno(key)}
-                className={`flex-1 rounded-lg px-5 py-2 text-sm font-medium transition ${
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-5 py-2 text-sm font-medium transition ${
                   turnoSeleccionado === key ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
                 }`}
               >
+                <Icon size={16} />
                 {label}
               </button>
             ))}
           </div>
-          <p className="text-center text-sm text-gray-400">Horario: {horario}</p>
+
+          <div className="flex items-center gap-2 rounded-full bg-white/5 px-4 py-2 text-base font-medium text-gray-200">
+            <Clock size={16} className="text-gray-400" />
+            {horario}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

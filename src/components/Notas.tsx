@@ -19,6 +19,7 @@ interface Comentario {
 }
 
 interface Nota {
+  id: string;
   contenido: string;
   autor: string;
   fecha: string; // ISO string
@@ -32,6 +33,7 @@ interface NotasProps {
 }
 
 const STORAGE_KEY = "torreantares_notas";
+const LEIDAS_KEY = "torreantares_notas_leidas";
 
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -42,6 +44,21 @@ const MESES = [
 // Cuando haya una búsqueda real contra un backend, esto desaparece: el loader
 // se mostraría mientras dura el fetch real, no un timeout fijo como ahora.
 const DEMORA_BUSQUEDA_MS = 700;
+
+function generarId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function cargarLeidasPorUsuario(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const guardado = localStorage.getItem(LEIDAS_KEY);
+    return guardado ? JSON.parse(guardado) : {};
+  } catch {
+    return {};
+  }
+}
 
 export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -62,9 +79,11 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
       const guardado = localStorage.getItem(STORAGE_KEY);
       if (!guardado) return [];
       const parsed = JSON.parse(guardado);
-      // Compatibilidad: si hay notas viejas sin "comentarios", se les agrega vacío
+      // Compatibilidad: notas viejas sin "comentarios" o sin "id" (agregado
+      // recién para poder trackear qué leyó cada usuario) se completan acá.
       return parsed.map((n: Nota) => ({
         ...n,
+        id: n.id ?? generarId(),
         comentarios: n.comentarios ?? [],
       }));
     } catch {
@@ -72,9 +91,39 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     }
   });
 
+  // Notas que este usuario todavía no había visto la última vez que entró.
+  // Es un snapshot fijo tomado al montar: aunque se marquen como "leídas"
+  // enseguida (para la próxima visita), acá siguen mostrando el badge
+  // "Nuevo" durante toda esta visita.
+  const [notasNuevasIds, setNotasNuevasIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(notas));
   }, [notas]);
+
+  // Calcula qué notas son "nuevas" para este usuario, usando el registro de
+  // lectura tal como estaba ANTES de esta visita. Corre una sola vez al montar.
+  useEffect(() => {
+    const leidasPorUsuario = cargarLeidasPorUsuario();
+    const leidasDeEsteUsuario = new Set(leidasPorUsuario[usuario.nombre] ?? []);
+
+    const nuevas = new Set(
+      notas
+        .filter((n) => n.autor !== usuario.nombre && !leidasDeEsteUsuario.has(n.id))
+        .map((n) => n.id)
+    );
+    setNotasNuevasIds(nuevas);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cada vez que cambia la lista de notas (incluida la carga inicial, después
+  // del efecto de arriba), guarda que este usuario ya vio todas las que hay
+  // ahora — así la próxima vez que entre, solo lo genuinamente nuevo aparece.
+  useEffect(() => {
+    const leidasPorUsuario = cargarLeidasPorUsuario();
+    leidasPorUsuario[usuario.nombre] = notas.map((n) => n.id);
+    localStorage.setItem(LEIDAS_KEY, JSON.stringify(leidasPorUsuario));
+  }, [notas, usuario.nombre]);
 
   useEffect(() => {
     // Por ahora las notas se leen de localStorage (sincrónico, sin demora real).
@@ -138,6 +187,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
 
   const handleNoteCreated = (contenido: string) => {
     const nuevaNota: Nota = {
+      id: generarId(),
       contenido,
       autor: usuario.nombre,
       fecha: new Date().toISOString(),
@@ -294,8 +344,9 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
 
         {notasOrdenadas.map(({ nota, indexOriginal }) => (
           <NoteCard
-            key={indexOriginal}
+            key={nota.id}
             nota={nota}
+            esNueva={notasNuevasIds.has(nota.id)}
             formatearFecha={formatearFecha}
             onAddComment={(contenido) => handleAddComment(indexOriginal, contenido)}
           />

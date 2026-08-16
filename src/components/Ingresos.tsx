@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, Plus, User, Car, Phone, Mail, MapPin, Zap } from "lucide-react";
+import { ArrowLeft, Plus, User, Car, Phone, Mail, MapPin, Zap, AlertTriangle } from "lucide-react";
 import { NewIngresoModal, FinalizarIngresoModal, CocheraAvisoModal, CompletarLecturaUteModal } from "./IngresoModals";
+import { leerVehiculos, guardarVehiculos, normalizarMatricula, type Vehiculo } from "./Cocheras";
+import { leerContactos, guardarContactos, type Contacto } from "./Contactos";
 
 export type Ocupacion = "inquilino" | "invitado" | "propietario";
 
@@ -31,6 +33,10 @@ export interface Ingreso {
   importeUte?: number;
   cancelado?: boolean;
   motivoCancelacion?: string;
+  /** id del contacto que se creó automáticamente en Contactos al registrar este ingreso. */
+  contactoRegistradoId?: string;
+  /** id del vehículo que se creó automáticamente en Cocheras (solo si se cargó matrícula). */
+  vehiculoRegistradoId?: string;
 }
 
 interface Usuario {
@@ -77,13 +83,21 @@ function agregarNotaDesdeIngreso(autor: string, contenido: string) {
     };
     localStorage.setItem(NOTAS_STORAGE_KEY, JSON.stringify([...notas, nuevaNota]));
   } catch {
-    // Si falla el guardado de la nota, no bloqueamos la cancelación del ingreso.
+    // Si falla el guardado de la nota, no bloqueamos la creación/cancelación del ingreso.
   }
 }
 
 export type NuevoIngresoData = Omit<
   Ingreso,
-  "id" | "autor" | "fechaCreacion" | "finalizado" | "fechaFinalizacion" | "importeUte" | "lecturaUteSalida"
+  | "id"
+  | "autor"
+  | "fechaCreacion"
+  | "finalizado"
+  | "fechaFinalizacion"
+  | "importeUte"
+  | "lecturaUteSalida"
+  | "contactoRegistradoId"
+  | "vehiculoRegistradoId"
 >;
 
 const OCUPACION_LABEL: Record<Ocupacion, string> = {
@@ -95,6 +109,21 @@ const OCUPACION_LABEL: Record<Ocupacion, string> = {
 function generarId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+// El formulario de Ingresos pide "Nombre y apellido" en un solo campo, pero
+// Contactos y Cocheras necesitan nombre/apellido separados. Heurística simple:
+// la primera palabra es el nombre, el resto el apellido.
+function separarNombreApellido(nombreCompleto: string) {
+  const partes = nombreCompleto.trim().split(/\s+/);
+  const nombre = partes[0] ?? "";
+  const apellido = partes.slice(1).join(" ");
+  return { nombre, apellido };
+}
+
+function hoyISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function formatearFecha(fecha: string) {
@@ -122,6 +151,12 @@ function IngresoCard({
 }) {
   const faltaLecturaEntrada = ingreso.tomaConsumoUte && ingreso.lecturaUteEntrada === undefined;
 
+  // Activo, no cancelado, y la fecha de salida estimada ya pasó: la estadía
+  // debería haber terminado pero nadie la finalizó en el sistema. Mientras
+  // quede así, ese depto sigue "ocupado" para la app (bloquea un ingreso
+  // nuevo), así que hay que resaltarlo para que se valide cuanto antes.
+  const vencido = !ingreso.cancelado && !ingreso.finalizado && ingreso.fechaSalida < hoyISO();
+
   return (
     <div
       className={`flex flex-col gap-3 rounded-2xl border p-5 ${
@@ -129,6 +164,8 @@ function IngresoCard({
           ? "border-red-500/20 bg-red-500/[0.03]"
           : ingreso.finalizado
           ? "border-white/10 bg-white/[0.03]"
+          : vencido
+          ? "border-amber-500/40 bg-amber-500/[0.06]"
           : "border-emerald-500/25 bg-emerald-500/[0.05]"
       }`}
     >
@@ -147,6 +184,11 @@ function IngresoCard({
         ) : ingreso.finalizado ? (
           <span className="whitespace-nowrap rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-gray-300">
             Finalizado
+          </span>
+        ) : vencido ? (
+          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-400">
+            <AlertTriangle size={12} />
+            Venció · validar
           </span>
         ) : (
           <span className="whitespace-nowrap rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-400">
@@ -180,6 +222,14 @@ function IngresoCard({
           </span>
         )}
       </div>
+
+      {vencido && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <AlertTriangle size={14} className="shrink-0" />
+          La fecha de salida ya pasó y la estadía sigue activa. Mientras no se finalice, el depto{" "}
+          {ingreso.apartamento} sigue bloqueado para un ingreso nuevo.
+        </div>
+      )}
 
       {ingreso.cancelado ? (
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
@@ -229,7 +279,9 @@ function IngresoCard({
       {!ingreso.finalizado && (
         <button
           onClick={() => onFinalizar(ingreso)}
-          className="mt-1 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
+          className={`mt-1 w-full rounded-lg px-3 py-2 text-sm font-semibold text-white transition ${
+            vencido ? "bg-amber-600 hover:bg-amber-500" : "bg-blue-600 hover:bg-blue-500"
+          }`}
         >
           Finalizar estadía
         </button>
@@ -264,23 +316,6 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
   }, [ingresos]);
 
   useEffect(() => {
-    // Igual que en Notas y Parrilleros: por ahora se lee de localStorage
-    // (sincrónico, sin demora real), así que avisamos que ya está listo
-    // apenas se monta, para cerrar el loader.
-    //
-    // Cuando esto pase a consultar una base de datos real, mové este onListo()
-    // al finally() de ese fetch en lugar de llamarlo acá:
-    //
-    //   useEffect(() => {
-    //     (async () => {
-    //       try {
-    //         const data = await obtenerIngresosDesdeApi();
-    //         setIngresos(data);
-    //       } finally {
-    //         onListo?.();
-    //       }
-    //     })();
-    //   }, []);
     onListo?.();
   }, []);
 
@@ -293,27 +328,101 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
 
   const listaVisible = tab === "activos" ? activos : finalizados;
 
-  const handleAbrirNuevo = () => setModalNuevoAbierto(true);
+  const handleAbrirNuevo = () => {
+    setModalNuevoAbierto(true);
+  };
+
   const handleAbrirFinalizar = (ingreso: Ingreso) => setIngresoAFinalizar(ingreso);
   const handleAbrirCompletarUte = (ingreso: Ingreso) => setIngresoParaCompletarUte(ingreso);
 
+  const limpiarRegistrosAsociados = (ingreso: Ingreso) => {
+    if (ingreso.ocupacion !== "inquilino" && ingreso.ocupacion !== "invitado") return;
+
+    if (ingreso.contactoRegistradoId) {
+      guardarContactos(leerContactos().filter((c) => c.id !== ingreso.contactoRegistradoId));
+    }
+    if (ingreso.vehiculoRegistradoId) {
+      guardarVehiculos(leerVehiculos().filter((v) => v.id !== ingreso.vehiculoRegistradoId));
+    }
+  };
+
   const handleCrearIngreso = (datos: NuevoIngresoData) => {
+    const yaOcupado = ingresos.find(
+      (i) => i.apartamento === datos.apartamento && !i.finalizado && !i.cancelado
+    );
+    if (yaOcupado) {
+      window.alert(
+        `El depto ${datos.apartamento} ya tiene un ingreso activo (${yaOcupado.nombre}). ` +
+          `Hay que finalizar o cancelar esa estadía antes de cargar una nueva.`
+      );
+      return;
+    }
+
+    const { nombre: nombrePila, apellido } = separarNombreApellido(datos.nombre);
+
+    const nuevoContacto: Contacto = {
+      id: generarId(),
+      nombre: nombrePila || datos.nombre,
+      apellido,
+      apartamento: datos.apartamento || undefined,
+      email: datos.email,
+      telefono: datos.telefono,
+      autor: usuario.nombre,
+      fechaCreacion: new Date().toISOString(),
+    };
+    guardarContactos([...leerContactos(), nuevoContacto]);
+
+    let vehiculoRegistradoId: string | undefined;
+    if (datos.matricula && datos.matricula.trim()) {
+      const nuevoVehiculo: Vehiculo = {
+        id: generarId(),
+        tipo: "auto",
+        matriculaOriginal: datos.matricula.trim().toUpperCase(),
+        matricula: normalizarMatricula(datos.matricula),
+        marca: datos.auto ?? "",
+        nombre: nombrePila || datos.nombre,
+        apellido,
+        apartamento: datos.apartamento,
+        telefono: datos.telefono,
+        correo: datos.email,
+        autor: usuario.nombre,
+        fechaCreacion: new Date().toISOString(),
+      };
+      guardarVehiculos([...leerVehiculos(), nuevoVehiculo]);
+      vehiculoRegistradoId = nuevoVehiculo.id;
+    }
+
     const nuevoIngreso: Ingreso = {
       ...datos,
       id: generarId(),
       autor: usuario.nombre,
       fechaCreacion: new Date().toISOString(),
       finalizado: false,
+      contactoRegistradoId: nuevoContacto.id,
+      vehiculoRegistradoId,
     };
     setIngresos((prev) => [...prev, nuevoIngreso]);
     setModalNuevoAbierto(false);
-    ultimoIngresoCreadoRef.current = nuevoIngreso;
-    setIngresoParaAvisoCochera(nuevoIngreso);
+
+    // El aviso de cochera solo tiene sentido si de verdad cargó un auto/moto
+    // (tildó "Tiene auto" en el formulario). Si no, saltamos directo al
+    // chequeo de UTE en vez de mostrar un aviso de cochera que no aplica.
+    if (nuevoIngreso.auto || nuevoIngreso.matricula) {
+      ultimoIngresoCreadoRef.current = nuevoIngreso;
+      setIngresoParaAvisoCochera(nuevoIngreso);
+    } else if (nuevoIngreso.tomaConsumoUte && nuevoIngreso.lecturaUteEntrada === undefined) {
+      setIngresoParaCompletarUte(nuevoIngreso);
+    }
+
+    // Nota automática del ingreso nuevo, con el mismo mecanismo de prefijo
+    // destacado que usamos para cancelaciones, pero en verde (NoteCard.tsx
+    // decide el color según el texto del prefijo: "Nuevo ingreso depto...").
+    agregarNotaDesdeIngreso(
+      usuario.nombre,
+      `Nuevo ingreso depto ${nuevoIngreso.apartamento}: ${nuevoIngreso.nombre} (${OCUPACION_LABEL[nuevoIngreso.ocupacion]}) del ${formatearFecha(nuevoIngreso.fechaIngreso)} al ${formatearFecha(nuevoIngreso.fechaSalida)}`
+    );
   };
 
-  // se llama al cerrar el aviso de cochera; si el ingreso recién creado
-  // marcó "tomar consumo de UTE" pero no cargó la lectura de entrada,
-  // encadenamos el modal para pedirla ahora
   const handleCerrarAvisoCochera = () => {
     setIngresoParaAvisoCochera(null);
     const ultimo = ultimoIngresoCreadoRef.current;
@@ -335,12 +444,13 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
     lecturaUteSalida?: number,
     lecturaUteEntradaSiFaltaba?: number
   ) => {
+    const ingreso = ingresos.find((i) => i.id === id);
+
     setIngresos((prev) =>
       prev.map((i) => {
         if (i.id !== id) return i;
 
         if (!i.tomaConsumoUte) {
-          // no cobra luz: se finaliza sin tocar nada de UTE
           return { ...i, finalizado: true, fechaFinalizacion: new Date().toISOString() };
         }
 
@@ -360,6 +470,11 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         };
       })
     );
+
+    if (ingreso) {
+      limpiarRegistrosAsociados(ingreso);
+    }
+
     setIngresoAFinalizar(null);
   };
 
@@ -385,6 +500,7 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         usuario.nombre,
         `Cancela ingreso depto ${ingreso.apartamento}: ${motivo}`
       );
+      limpiarRegistrosAsociados(ingreso);
     }
 
     setIngresoAFinalizar(null);
@@ -412,7 +528,6 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         </button>
       </div>
 
-      {/* Tabs Activos / Finalizados */}
       <div className="mb-6 flex rounded-xl border border-white/10 bg-white/5 p-1">
         <button
           onClick={() => setTab("activos")}
@@ -432,7 +547,6 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         </button>
       </div>
 
-      {/* Lista */}
       <div className="flex w-full max-w-3xl flex-col gap-4">
         {listaVisible.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/10 py-16 text-center text-gray-500">
@@ -457,6 +571,7 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         isOpen={modalNuevoAbierto}
         onClose={() => setModalNuevoAbierto(false)}
         usuario={usuario}
+        ingresos={ingresos}
         onCrear={handleCrearIngreso}
       />
 
