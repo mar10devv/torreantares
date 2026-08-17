@@ -14,6 +14,7 @@ import PropietariosInquilinos from "./PropietariosInquilinos";
 import IngresarPinModal from "./IngresarPinModal";
 import Loader from "./Loader";
 import logo from "../assets/logo.png";
+import { obtenerUsuariosDeDB } from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -34,7 +35,6 @@ type Vista =
   | "contactos"
   | "residentes"; // Propietarios/Inquilinos — acá se van sumando el resto
 
-const STORAGE_KEY = "torreantares_usuarios";
 const SESION_KEY = "torreantares_sesion";
 
 // Mapeo entre cada vista y su ruta en la URL, para que el navegador
@@ -59,9 +59,7 @@ const PATH_A_VISTA: Partial<Record<string, Vista>> = Object.fromEntries(
 );
 
 // tiempo mínimo (ms) que el loader se mantiene visible, para que la
-// animación llegue a verse aunque la carga real sea instantánea
-// (como ahora, que lee de localStorage). Si la carga real tarda más
-// que esto, no afecta en nada: simplemente se oculta apenas onListo() llega.
+// animación llegue a verse aunque la carga real sea instantánea.
 const LOADER_MIN_MS = 700;
 
 export default function Home() {
@@ -69,7 +67,7 @@ export default function Home() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [usuarioIntentandoLogin, setUsuarioIntentandoLogin] = useState<Usuario | null>(null);
 
-  // Se restauran al cargar la página: el usuario desde sessionStorage
+  // Se restaura al cargar la página: el usuario desde sessionStorage
   // (sobrevive a un F5, se borra si cerrás la pestaña/navegador), y la
   // vista inicial directo desde la URL actual — así un refresh en
   // /parrilleros te mantiene ahí en vez de mandarte al login.
@@ -94,19 +92,29 @@ export default function Home() {
   const loaderInicioRef = useRef<number | null>(null);
   const loaderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [usuarios, setUsuarios] = useState<Usuario[]>(() => {
-    if (typeof window === "undefined") return [];
+  // Los usuarios ahora viven en Firestore, no en localStorage.
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [cargandoUsuarios, setCargandoUsuarios] = useState(true);
+  const [errorUsuarios, setErrorUsuarios] = useState("");
+
+  // Trae la lista de usuarios desde Firestore. Se usa tanto al montar
+  // el componente como después de crear un usuario nuevo.
+  const cargarUsuarios = async () => {
     try {
-      const guardado = localStorage.getItem(STORAGE_KEY);
-      return guardado ? JSON.parse(guardado) : [];
-    } catch {
-      return [];
+      setErrorUsuarios("");
+      const datos = await obtenerUsuariosDeDB();
+      setUsuarios(datos as unknown as Usuario[]);
+    } catch (err) {
+      console.error("Error al cargar usuarios desde Firestore:", err);
+      setErrorUsuarios("No se pudieron cargar los usuarios. Revisá tu conexión.");
+    } finally {
+      setCargandoUsuarios(false);
     }
-  });
+  };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(usuarios));
-  }, [usuarios]);
+    cargarUsuarios();
+  }, []);
 
   // Si de verdad no hay sesión (no había nada en sessionStorage) y la URL
   // apunta a un módulo protegido, no hay forma de mostrar esa pantalla —
@@ -159,8 +167,11 @@ export default function Home() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const handleUserCreated = (usuario: Usuario) => {
-    setUsuarios((prev) => [...prev, usuario]);
+  // El usuario ya fue guardado en Firestore por CreateUserModal.
+  // Acá simplemente recargamos la lista para traer el id generado
+  // por Firebase y mantener todo sincronizado con la base.
+  const handleUserCreated = () => {
+    cargarUsuarios();
   };
 
   const handleUserUpdated = (usuarioActualizado: Usuario) => {
@@ -325,21 +336,27 @@ export default function Home() {
               </h1>
 
               <div className="flex flex-1 items-center justify-center w-full">
-                <div className="flex flex-wrap justify-center gap-8">
+                {cargandoUsuarios ? (
+                  <p className="text-gray-300">Cargando usuarios…</p>
+                ) : errorUsuarios ? (
+                  <p className="text-red-400">{errorUsuarios}</p>
+                ) : (
+                  <div className="flex flex-wrap justify-center gap-8">
 
-                  {usuarios.map((usuario, index) => (
-                    <UserCard
-                      key={index}
-                      usuario={usuario}
-                      onEdit={() => handleEditUser(index)}
-                      onDelete={() => handleDeleteUser(index)}
-                      onLogin={() => handleIntentarLogin(usuario)}
-                    />
-                  ))}
+                    {usuarios.map((usuario, index) => (
+                      <UserCard
+                        key={index}
+                        usuario={usuario}
+                        onEdit={() => handleEditUser(index)}
+                        onDelete={() => handleDeleteUser(index)}
+                        onLogin={() => handleIntentarLogin(usuario)}
+                      />
+                    ))}
 
-                  <AddUserCard onClick={handleOpenCreateModal} />
+                    <AddUserCard onClick={handleOpenCreateModal} />
 
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </main>

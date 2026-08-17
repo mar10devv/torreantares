@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
+import { crearUsuarioEnDB } from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -30,6 +31,7 @@ export default function CreateUserModal({
   const [telefono, setTelefono] = useState("");
   const [contrasena, setContrasena] = useState("");
   const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
 
   const esEdicion = usuarioEditando !== null;
 
@@ -66,6 +68,7 @@ export default function CreateUserModal({
   };
 
   const handleClose = () => {
+    if (guardando) return; // evita cerrar mientras se está guardando
     resetForm();
     onClose();
   };
@@ -102,15 +105,26 @@ export default function CreateUserModal({
       contrasena,
     };
 
-    // 🔽 Acá luego va la lógica con Firebase (create o update según esEdicion)
     if (esEdicion) {
+      // La edición contra Firestore la conectamos en un paso aparte.
       onUserUpdated(datosUsuario);
-    } else {
-      onUserCreated(datosUsuario);
+      resetForm();
+      onClose();
+      return;
     }
 
-    resetForm();
-    onClose();
+    try {
+      setGuardando(true);
+      await crearUsuarioEnDB(datosUsuario);
+      onUserCreated(datosUsuario);
+      resetForm();
+      onClose();
+    } catch (err) {
+      console.error("Error al crear usuario en Firestore:", err);
+      setError("No se pudo crear el usuario. Intentá de nuevo.");
+    } finally {
+      setGuardando(false);
+    }
   };
 
   return (
@@ -236,16 +250,18 @@ export default function CreateUserModal({
 
           <button
             onClick={handleClose}
-            className="rounded-xl border border-white/10 px-5 py-3 text-white transition hover:bg-white/10"
+            disabled={guardando}
+            className="rounded-xl border border-white/10 px-5 py-3 text-white transition hover:bg-white/10 disabled:opacity-50"
           >
             Cancelar
           </button>
 
           <button
             onClick={handleGuardar}
-            className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
+            disabled={guardando}
+            className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
           >
-            {esEdicion ? "Guardar cambios" : "Crear usuario"}
+            {guardando ? "Guardando..." : esEdicion ? "Guardar cambios" : "Crear usuario"}
           </button>
 
         </div>
