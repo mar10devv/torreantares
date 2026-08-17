@@ -76,3 +76,25 @@ export async function agregarComentarioEnDB(notaId, { contenido, autor }) {
     }),
   });
 }
+
+// Crea una reserva de parrillero nueva en la colección "parrilleros"
+export async function crearReservaParrilleroEnDB(reserva) {
+  const docRef = await addDoc(collection(db, "parrilleros"), reserva);
+  return docRef.id;
+}
+
+// Trae todas las reservas de la colección "parrilleros"
+export async function obtenerReservasParrilleroDeDB() {
+  const snapshot = await getDocs(collection(db, "parrilleros"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de una reserva existente (togglear pagado,
+// marcarla como cancelada, etc.)
+export async function actualizarReservaParrilleroEnDB(reservaId, cambios) {
+  const reservaRef = doc(db, "parrilleros", reservaId);
+  await updateDoc(reservaRef, cambios);
+}

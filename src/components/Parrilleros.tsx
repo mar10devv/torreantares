@@ -2,6 +2,12 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import DayGrillModal, { PRECIOS } from "./DayGrillModal";
 import type { ReservaParrillero, Turno, Ubicacion } from "./DayGrillModal";
+import {
+  crearReservaParrilleroEnDB,
+  obtenerReservasParrilleroDeDB,
+  actualizarReservaParrilleroEnDB,
+  crearNotaEnDB,
+} from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -17,50 +23,12 @@ interface ParrillerosProps {
   onListo?: () => void;
 }
 
-const STORAGE_KEY = "torreantares_parrilleros";
-const NOTAS_STORAGE_KEY = "torreantares_notas";
-
-interface ComentarioNota {
-  contenido: string;
-  autor: string;
-  fecha: string;
-}
-
-interface NotaAutomatica {
-  contenido: string;
-  autor: string;
-  fecha: string;
-  comentarios: ComentarioNota[];
-}
-
-function agregarNotaDesdeParrillero(autor: string, contenido: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const guardado = localStorage.getItem(NOTAS_STORAGE_KEY);
-    const notas: NotaAutomatica[] = guardado ? JSON.parse(guardado) : [];
-    const nuevaNota: NotaAutomatica = {
-      contenido,
-      autor,
-      fecha: new Date().toISOString(),
-      comentarios: [],
-    };
-    localStorage.setItem(NOTAS_STORAGE_KEY, JSON.stringify([...notas, nuevaNota]));
-  } catch {
-    // Si falla el guardado de la nota, no bloqueamos la cancelación de la reserva.
-  }
-}
-
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ];
 
 const DIAS_SEMANA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-
-function generarId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 function fechaAKey(anio: number, mes: number, dia: number) {
   return `${anio}-${String(mes + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
@@ -86,42 +54,33 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
   });
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
 
-  const [reservas, setReservas] = useState<ReservaParrillero[]>(() => {
-    if (typeof window === "undefined") return [];
+  // Las reservas ahora viven en Firestore, no en localStorage.
+  const [reservas, setReservas] = useState<ReservaParrillero[]>([]);
+  const [cargandoReservas, setCargandoReservas] = useState(true);
+  const [errorReservas, setErrorReservas] = useState("");
+
+  const cargarReservas = async () => {
     try {
-      const guardado = localStorage.getItem(STORAGE_KEY);
-      return guardado ? JSON.parse(guardado) : [];
-    } catch {
-      return [];
+      setErrorReservas("");
+      const datos = await obtenerReservasParrilleroDeDB();
+      setReservas(datos as unknown as ReservaParrillero[]);
+    } catch (err) {
+      console.error("Error al cargar reservas desde Firestore:", err);
+      setErrorReservas("No se pudieron cargar las reservas. Revisá tu conexión.");
+    } finally {
+      setCargandoReservas(false);
     }
-  });
+  };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(reservas));
-  }, [reservas]);
-
-  useEffect(() => {
-    // Igual que en Notas: por ahora las reservas se leen de localStorage
-    // (sincrónico, sin demora real), así que avisamos que ya está listo
-    // apenas se monta, para cerrar el loader.
-    //
-    // Cuando esto pase a consultar una base de datos real, mové este onListo()
-    // al finally() de ese fetch en lugar de llamarlo acá:
-    //
-    //   useEffect(() => {
-    //     (async () => {
-    //       try {
-    //         const data = await obtenerReservasDesdeApi();
-    //         setReservas(data);
-    //       } finally {
-    //         onListo?.();
-    //       }
-    //     })();
-    //   }, []);
-    onListo?.();
+    (async () => {
+      await cargarReservas();
+      onListo?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleReservar = (
+  const handleReservar = async (
     parrillero: 1 | 2,
     turno: Turno,
     unidad: string,
@@ -130,8 +89,8 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
     pagado: boolean
   ) => {
     if (!diaSeleccionado) return;
-    const nuevaReserva: ReservaParrillero = {
-      id: generarId(),
+
+    const nuevaReserva = {
       ubicacion,
       parrillero,
       fecha: diaSeleccionado,
@@ -145,37 +104,52 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
       pagado,
       cancelada: false,
     };
-    setReservas((prev) => [...prev, nuevaReserva]);
+
+    try {
+      await crearReservaParrilleroEnDB(nuevaReserva);
+      await cargarReservas();
+    } catch (err) {
+      console.error("Error al crear reserva en Firestore:", err);
+      setErrorReservas("No se pudo crear la reserva. Intentá de nuevo.");
+    }
   };
 
-  const handleTogglePagado = (id: string) => {
-    setReservas((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, pagado: !r.pagado } : r))
-    );
-  };
-
-  const handleCancelar = (id: string, motivo: string) => {
+  const handleTogglePagado = async (id: string) => {
     const reserva = reservas.find((r) => r.id === id);
+    if (!reserva) return;
 
-    setReservas((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              cancelada: true,
-              fechaCancelacion: new Date().toISOString(),
-              canceladoPor: usuario.nombre,
-              motivoCancelacion: motivo,
-            }
-          : r
-      )
-    );
+    try {
+      await actualizarReservaParrilleroEnDB(id, { pagado: !reserva.pagado });
+      await cargarReservas();
+    } catch (err) {
+      console.error("Error al actualizar el pago en Firestore:", err);
+      setErrorReservas("No se pudo actualizar el pago. Intentá de nuevo.");
+    }
+  };
 
-    if (reserva) {
-      agregarNotaDesdeParrillero(
-        usuario.nombre,
-        `Cancela parrillero unidad ${reserva.unidad}: ${motivo}`
-      );
+  const handleCancelar = async (id: string, motivo: string) => {
+    const reserva = reservas.find((r) => r.id === id);
+    if (!reserva) return;
+
+    try {
+      await actualizarReservaParrilleroEnDB(id, {
+        cancelada: true,
+        fechaCancelacion: new Date().toISOString(),
+        canceladoPor: usuario.nombre,
+        motivoCancelacion: motivo,
+      });
+
+      // Nota automática de la cancelación, ahora en la misma colección
+      // "notas" de Firestore que usa el módulo Notas.
+      await crearNotaEnDB({
+        contenido: `Cancela parrillero unidad ${reserva.unidad}: ${motivo}`,
+        autor: usuario.nombre,
+      });
+
+      await cargarReservas();
+    } catch (err) {
+      console.error("Error al cancelar la reserva en Firestore:", err);
+      setErrorReservas("No se pudo cancelar la reserva. Intentá de nuevo.");
     }
   };
 
@@ -219,6 +193,10 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
         <div className="w-[92px] sm:w-[104px]" />
       </div>
 
+      {errorReservas && (
+        <p className="mb-4 text-sm text-red-400">{errorReservas}</p>
+      )}
+
       {/* Tabs Adentro / Afuera */}
       <div className="mb-6 flex rounded-xl border border-white/10 bg-white/5 p-1">
         <button
@@ -258,73 +236,79 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
         </button>
       </div>
 
-      {/* Calendario */}
-      <div className="w-full max-w-3xl">
-        <div className="mb-2 grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-gray-500 sm:gap-2">
-          {DIAS_SEMANA.map((d) => (
-            <div key={d}>{d}</div>
-          ))}
-        </div>
+      {cargandoReservas ? (
+        <p className="text-gray-400">Cargando reservas…</p>
+      ) : (
+        <>
+          {/* Calendario */}
+          <div className="w-full max-w-3xl">
+            <div className="mb-2 grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-gray-500 sm:gap-2">
+              {DIAS_SEMANA.map((d) => (
+                <div key={d}>{d}</div>
+              ))}
+            </div>
 
-        <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-          {celdas.map((dia, index) => {
-            if (dia === null) return <div key={`vacio-${index}`} />;
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+              {celdas.map((dia, index) => {
+                if (dia === null) return <div key={`vacio-${index}`} />;
 
-            const fechaKey = fechaAKey(anio, mes, dia);
-            const activas = reservasActivasEnFecha(fechaKey);
-            const pasado = esPasado(anio, mes, dia);
+                const fechaKey = fechaAKey(anio, mes, dia);
+                const activas = reservasActivasEnFecha(fechaKey);
+                const pasado = esPasado(anio, mes, dia);
 
-            // Un punto por parrillero (no por turno): rojo si ese parrillero
-            // tiene alguna reserva activa ese día (mediodía o noche), verde si está libre.
-            const estadoParrilleros = ([1, 2] as const).map((p) =>
-              activas.some((r) => r.parrillero === p)
-            );
+                // Un punto por parrillero (no por turno): rojo si ese parrillero
+                // tiene alguna reserva activa ese día (mediodía o noche), verde si está libre.
+                const estadoParrilleros = ([1, 2] as const).map((p) =>
+                  activas.some((r) => r.parrillero === p)
+                );
 
-            return (
-              <button
-                key={fechaKey}
-                onClick={() => setDiaSeleccionado(fechaKey)}
-                className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border p-1 transition hover:border-blue-500/50 hover:bg-white/10 ${
-                  esHoy(anio, mes, dia)
-                    ? "border-blue-500/50 bg-blue-500/10"
-                    : pasado
-                    ? "border-white/5 bg-white/[0.015]"
-                    : "border-white/10 bg-white/[0.04]"
-                }`}
-              >
-                <span
-                  className={`text-sm font-semibold sm:text-base ${
-                    pasado ? "text-gray-600" : "text-white"
-                  }`}
-                >
-                  {dia}
-                </span>
-                <div className="flex gap-1">
-                  {estadoParrilleros.map((ocupado, i) => (
+                return (
+                  <button
+                    key={fechaKey}
+                    onClick={() => setDiaSeleccionado(fechaKey)}
+                    className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border p-1 transition hover:border-blue-500/50 hover:bg-white/10 ${
+                      esHoy(anio, mes, dia)
+                        ? "border-blue-500/50 bg-blue-500/10"
+                        : pasado
+                        ? "border-white/5 bg-white/[0.015]"
+                        : "border-white/10 bg-white/[0.04]"
+                    }`}
+                  >
                     <span
-                      key={i}
-                      className={`h-2.5 w-2.5 rounded-full ${
-                        pasado
-                          ? ocupado
-                            ? "bg-red-900/50"
-                            : "bg-white/10"
-                          : ocupado
-                          ? "bg-red-500"
-                          : "bg-emerald-500"
+                      className={`text-sm font-semibold sm:text-base ${
+                        pasado ? "text-gray-600" : "text-white"
                       }`}
-                    />
-                  ))}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+                    >
+                      {dia}
+                    </span>
+                    <div className="flex gap-1">
+                      {estadoParrilleros.map((ocupado, i) => (
+                        <span
+                          key={i}
+                          className={`h-2.5 w-2.5 rounded-full ${
+                            pasado
+                              ? ocupado
+                                ? "bg-red-900/50"
+                                : "bg-white/10"
+                              : ocupado
+                              ? "bg-red-500"
+                              : "bg-emerald-500"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      <p className="mt-6 flex items-center gap-2 text-xs text-gray-500">
-        <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Ocupado
-        <span className="ml-3 h-2.5 w-2.5 rounded-full bg-emerald-500" /> Libre
-      </p>
+          <p className="mt-6 flex items-center gap-2 text-xs text-gray-500">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Ocupado
+            <span className="ml-3 h-2.5 w-2.5 rounded-full bg-emerald-500" /> Libre
+          </p>
+        </>
+      )}
 
       {diaSeleccionado && (
         <DayGrillModal
