@@ -4,6 +4,9 @@ import {
   collection,
   addDoc,
   getDocs,
+  doc,
+  updateDoc,
+  arrayUnion,
   serverTimestamp,
 } from "firebase/firestore";
 
@@ -40,4 +43,36 @@ export async function obtenerUsuariosDeDB() {
     id: doc.id,
     ...doc.data(),
   }));
+}
+
+// Crea una nota nueva en la colección "notas"
+export async function crearNotaEnDB({ contenido, autor }) {
+  const docRef = await addDoc(collection(db, "notas"), {
+    contenido,
+    autor,
+    fecha: new Date().toISOString(),
+    comentarios: [],
+  });
+  return docRef.id;
+}
+
+// Trae todas las notas de la colección "notas"
+export async function obtenerNotasDeDB() {
+  const snapshot = await getDocs(collection(db, "notas"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Agrega un comentario dentro del array "comentarios" de una nota puntual
+export async function agregarComentarioEnDB(notaId, { contenido, autor }) {
+  const notaRef = doc(db, "notas", notaId);
+  await updateDoc(notaRef, {
+    comentarios: arrayUnion({
+      contenido,
+      autor,
+      fecha: new Date().toISOString(),
+    }),
+  });
 }

@@ -3,6 +3,7 @@ import { ArrowLeft, Plus, ChevronLeft, ChevronRight, Search } from "lucide-react
 import CreateNoteModal from "./CreateNoteModal";
 import NoteCard from "./NoteCard";
 import Loader from "./Loader";
+import { crearNotaEnDB, obtenerNotasDeDB, agregarComentarioEnDB } from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -32,7 +33,6 @@ interface NotasProps {
   onListo?: () => void;
 }
 
-const STORAGE_KEY = "torreantares_notas";
 const LEIDAS_KEY = "torreantares_notas_leidas";
 
 const MESES = [
@@ -44,11 +44,6 @@ const MESES = [
 // Cuando haya una búsqueda real contra un backend, esto desaparece: el loader
 // se mostraría mientras dura el fetch real, no un timeout fijo como ahora.
 const DEMORA_BUSQUEDA_MS = 700;
-
-function generarId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 function cargarLeidasPorUsuario(): Record<string, string[]> {
   if (typeof window === "undefined") return {};
@@ -73,81 +68,57 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
   const [buscando, setBuscando] = useState(false);
   const busquedaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [notas, setNotas] = useState<Nota[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEY);
-      if (!guardado) return [];
-      const parsed = JSON.parse(guardado);
-      // Compatibilidad: notas viejas sin "comentarios" o sin "id" (agregado
-      // recién para poder trackear qué leyó cada usuario) se completan acá.
-      return parsed.map((n: Nota) => ({
-        ...n,
-        id: n.id ?? generarId(),
-        comentarios: n.comentarios ?? [],
-      }));
-    } catch {
-      return [];
-    }
-  });
+  // Las notas ahora viven en Firestore, no en localStorage.
+  const [notas, setNotas] = useState<Nota[]>([]);
+  const [cargandoNotas, setCargandoNotas] = useState(true);
+  const [errorNotas, setErrorNotas] = useState("");
 
   // Notas que este usuario todavía no había visto la última vez que entró.
-  // Es un snapshot fijo tomado al montar: aunque se marquen como "leídas"
-  // enseguida (para la próxima visita), acá siguen mostrando el badge
-  // "Nuevo" durante toda esta visita.
+  // Es un snapshot fijo: se calcula una sola vez, apenas terminan de cargar
+  // las notas por primera vez, y no vuelve a recalcularse en esta visita.
   const [notasNuevasIds, setNotasNuevasIds] = useState<Set<string>>(new Set());
+  const yaCalculoNuevasRef = useRef(false);
+
+  // Trae la lista de notas desde Firestore. Se usa tanto al montar el
+  // componente como después de crear una nota o agregar un comentario.
+  const cargarNotas = async () => {
+    try {
+      setErrorNotas("");
+      const datos = await obtenerNotasDeDB();
+      setNotas(datos as unknown as Nota[]);
+      return datos as unknown as Nota[];
+    } catch (err) {
+      console.error("Error al cargar notas desde Firestore:", err);
+      setErrorNotas("No se pudieron cargar las notas. Revisá tu conexión.");
+      return [];
+    } finally {
+      setCargandoNotas(false);
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notas));
-  }, [notas]);
+    (async () => {
+      const datos = await cargarNotas();
 
-  // Calcula qué notas son "nuevas" para este usuario, usando el registro de
-  // lectura tal como estaba ANTES de esta visita. Corre una sola vez al montar.
-  useEffect(() => {
-    const leidasPorUsuario = cargarLeidasPorUsuario();
-    const leidasDeEsteUsuario = new Set(leidasPorUsuario[usuario.nombre] ?? []);
+      // Calcula qué notas son "nuevas" para este usuario, usando el registro
+      // de lectura tal como estaba ANTES de esta visita.
+      const leidasPorUsuario = cargarLeidasPorUsuario();
+      const leidasDeEsteUsuario = new Set(leidasPorUsuario[usuario.nombre] ?? []);
+      const nuevas = new Set(
+        datos
+          .filter((n) => n.autor !== usuario.nombre && !leidasDeEsteUsuario.has(n.id))
+          .map((n) => n.id)
+      );
+      setNotasNuevasIds(nuevas);
+      yaCalculoNuevasRef.current = true;
 
-    const nuevas = new Set(
-      notas
-        .filter((n) => n.autor !== usuario.nombre && !leidasDeEsteUsuario.has(n.id))
-        .map((n) => n.id)
-    );
-    setNotasNuevasIds(nuevas);
+      // Marca todas las notas actuales como leídas para la próxima visita.
+      leidasPorUsuario[usuario.nombre] = datos.map((n) => n.id);
+      localStorage.setItem(LEIDAS_KEY, JSON.stringify(leidasPorUsuario));
+
+      onListo?.();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Cada vez que cambia la lista de notas (incluida la carga inicial, después
-  // del efecto de arriba), guarda que este usuario ya vio todas las que hay
-  // ahora — así la próxima vez que entre, solo lo genuinamente nuevo aparece.
-  useEffect(() => {
-    const leidasPorUsuario = cargarLeidasPorUsuario();
-    leidasPorUsuario[usuario.nombre] = notas.map((n) => n.id);
-    localStorage.setItem(LEIDAS_KEY, JSON.stringify(leidasPorUsuario));
-  }, [notas, usuario.nombre]);
-
-  useEffect(() => {
-    // Por ahora las notas se leen de localStorage (sincrónico, sin demora real).
-    // Avisamos que ya está listo apenas se monta, para cerrar el loader.
-    //
-    // Cuando esto pase a consultar una base de datos real, la idea es que la
-    // consulta ya venga filtrada por mes/año (traer solo "el mes actual", y
-    // pedir el resto bajo demanda al navegar con las flechas), en vez de traer
-    // todas las notas y filtrarlas acá como hacemos ahora. Algo así:
-    //
-    //   useEffect(() => {
-    //     (async () => {
-    //       try {
-    //         const data = await obtenerNotasDesdeApi({
-    //           anio: mesSeleccionado.anio,
-    //           mes: mesSeleccionado.mes,
-    //         });
-    //         setNotas(data);
-    //       } finally {
-    //         onListo?.();
-    //       }
-    //     })();
-    //   }, [mesSeleccionado]);
-    onListo?.();
   }, []);
 
   // Buscador: se dispara manualmente (botón "Buscar" o tecla Enter), no
@@ -185,31 +156,24 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     if (e.key === "Enter") handleBuscar();
   };
 
-  const handleNoteCreated = (contenido: string) => {
-    const nuevaNota: Nota = {
-      id: generarId(),
-      contenido,
-      autor: usuario.nombre,
-      fecha: new Date().toISOString(),
-      comentarios: [],
-    };
-    setNotas((prev) => [...prev, nuevaNota]);
+  const handleNoteCreated = async (contenido: string) => {
+    try {
+      await crearNotaEnDB({ contenido, autor: usuario.nombre });
+      await cargarNotas();
+    } catch (err) {
+      console.error("Error al crear nota en Firestore:", err);
+      setErrorNotas("No se pudo crear la nota. Intentá de nuevo.");
+    }
   };
 
-  const handleAddComment = (notaIndexOriginal: number, contenido: string) => {
-    const nuevoComentario: Comentario = {
-      contenido,
-      autor: usuario.nombre,
-      fecha: new Date().toISOString(),
-    };
-
-    setNotas((prev) =>
-      prev.map((n, i) =>
-        i === notaIndexOriginal
-          ? { ...n, comentarios: [...n.comentarios, nuevoComentario] }
-          : n
-      )
-    );
+  const handleAddComment = async (notaId: string, contenido: string) => {
+    try {
+      await agregarComentarioEnDB(notaId, { contenido, autor: usuario.nombre });
+      await cargarNotas();
+    } catch (err) {
+      console.error("Error al agregar comentario en Firestore:", err);
+      setErrorNotas("No se pudo agregar el comentario. Intentá de nuevo.");
+    }
   };
 
   const cambiarMes = (delta: number) => {
@@ -230,30 +194,26 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     });
   };
 
-  // Guardamos el índice original (en el array "notas" sin ordenar) junto a cada nota,
-  // así al agregar un comentario sabemos exactamente cuál actualizar en el estado real.
-  const notasConIndice = notas.map((nota, indexOriginal) => ({ nota, indexOriginal }));
-
   const hayBusqueda = terminoActivo.trim() !== "";
 
   // Con búsqueda activa: se busca en TODAS las notas (sin importar el mes),
   // por contenido o autor. Sin búsqueda: se respeta el mes seleccionado.
   const notasFiltradas = hayBusqueda
-    ? notasConIndice.filter(({ nota }) => {
+    ? notas.filter((nota) => {
         const termino = terminoActivo.toLowerCase();
         return (
           nota.contenido.toLowerCase().includes(termino) ||
           nota.autor.toLowerCase().includes(termino)
         );
       })
-    : notasConIndice.filter(({ nota }) => {
+    : notas.filter((nota) => {
         const fecha = new Date(nota.fecha);
         return fecha.getFullYear() === mesSeleccionado.anio && fecha.getMonth() === mesSeleccionado.mes;
       });
 
   // Más recientes primero
   const notasOrdenadas = [...notasFiltradas].sort(
-    (a, b) => new Date(b.nota.fecha).getTime() - new Date(a.nota.fecha).getTime()
+    (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
   );
 
   return (
@@ -334,23 +294,31 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
       )}
 
       <div className="flex w-full max-w-2xl flex-col gap-4">
-        {notasOrdenadas.length === 0 && (
-          <p className="text-center text-gray-400">
-            {hayBusqueda
-              ? `No se encontraron notas para "${terminoActivo}".`
-              : `No hay notas en ${MESES[mesSeleccionado.mes].toLowerCase()} de ${mesSeleccionado.anio}.`}
-          </p>
-        )}
+        {cargandoNotas ? (
+          <p className="text-center text-gray-400">Cargando notas…</p>
+        ) : errorNotas ? (
+          <p className="text-center text-red-400">{errorNotas}</p>
+        ) : (
+          <>
+            {notasOrdenadas.length === 0 && (
+              <p className="text-center text-gray-400">
+                {hayBusqueda
+                  ? `No se encontraron notas para "${terminoActivo}".`
+                  : `No hay notas en ${MESES[mesSeleccionado.mes].toLowerCase()} de ${mesSeleccionado.anio}.`}
+              </p>
+            )}
 
-        {notasOrdenadas.map(({ nota, indexOriginal }) => (
-          <NoteCard
-            key={nota.id}
-            nota={nota}
-            esNueva={notasNuevasIds.has(nota.id)}
-            formatearFecha={formatearFecha}
-            onAddComment={(contenido) => handleAddComment(indexOriginal, contenido)}
-          />
-        ))}
+            {notasOrdenadas.map((nota) => (
+              <NoteCard
+                key={nota.id}
+                nota={nota}
+                esNueva={notasNuevasIds.has(nota.id)}
+                formatearFecha={formatearFecha}
+                onAddComment={(contenido) => handleAddComment(nota.id, contenido)}
+              />
+            ))}
+          </>
+        )}
       </div>
 
       <CreateNoteModal
