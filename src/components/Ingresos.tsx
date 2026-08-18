@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Plus, User, Car, Phone, Mail, MapPin, Zap, AlertTriangle } from "lucide-react";
 import { NewIngresoModal, FinalizarIngresoModal, CocheraAvisoModal, CompletarLecturaUteModal } from "./IngresoModals";
-import { leerVehiculos, guardarVehiculos, normalizarMatricula, type Vehiculo } from "./Cocheras";
-import { leerContactos, guardarContactos, type Contacto } from "./Contactos";
+import { normalizarMatricula, type Vehiculo } from "./Cocheras";
+import type { Contacto } from "./Contactos";
+import {
+  crearIngresoEnDB,
+  obtenerIngresosDeDB,
+  actualizarIngresoEnDB,
+  crearNotaEnDB,
+  crearContactoEnDB,
+  eliminarContactoEnDB,
+  crearVehiculoEnDB,
+  eliminarVehiculoEnDB,
+} from "../lib/firebase";
 
 export type Ocupacion = "inquilino" | "invitado" | "propietario";
 
@@ -53,39 +63,7 @@ interface IngresosProps {
   onListo?: () => void;
 }
 
-const STORAGE_KEY = "torreantares_ingresos";
-const NOTAS_STORAGE_KEY = "torreantares_notas";
 export const PRECIO_UTE = 15;
-
-interface ComentarioNota {
-  contenido: string;
-  autor: string;
-  fecha: string;
-}
-
-interface NotaAutomatica {
-  contenido: string;
-  autor: string;
-  fecha: string;
-  comentarios: ComentarioNota[];
-}
-
-function agregarNotaDesdeIngreso(autor: string, contenido: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const guardado = localStorage.getItem(NOTAS_STORAGE_KEY);
-    const notas: NotaAutomatica[] = guardado ? JSON.parse(guardado) : [];
-    const nuevaNota: NotaAutomatica = {
-      contenido,
-      autor,
-      fecha: new Date().toISOString(),
-      comentarios: [],
-    };
-    localStorage.setItem(NOTAS_STORAGE_KEY, JSON.stringify([...notas, nuevaNota]));
-  } catch {
-    // Si falla el guardado de la nota, no bloqueamos la creación/cancelación del ingreso.
-  }
-}
 
 export type NuevoIngresoData = Omit<
   Ingreso,
@@ -105,11 +83,6 @@ const OCUPACION_LABEL: Record<Ocupacion, string> = {
   invitado: "Invitado",
   propietario: "Propietario",
 };
-
-function generarId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 // El formulario de Ingresos pide "Nombre y apellido" en un solo campo, pero
 // Contactos y Cocheras necesitan nombre/apellido separados. Heurística simple:
@@ -151,10 +124,6 @@ function IngresoCard({
 }) {
   const faltaLecturaEntrada = ingreso.tomaConsumoUte && ingreso.lecturaUteEntrada === undefined;
 
-  // Activo, no cancelado, y la fecha de salida estimada ya pasó: la estadía
-  // debería haber terminado pero nadie la finalizó en el sistema. Mientras
-  // quede así, ese depto sigue "ocupado" para la app (bloquea un ingreso
-  // nuevo), así que hay que resaltarlo para que se valide cuanto antes.
   const vencido = !ingreso.cancelado && !ingreso.finalizado && ingreso.fechaSalida < hoyISO();
 
   return (
@@ -296,27 +265,32 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
   const [ingresoAFinalizar, setIngresoAFinalizar] = useState<Ingreso | null>(null);
   const [ingresoParaAvisoCochera, setIngresoParaAvisoCochera] = useState<Ingreso | null>(null);
   const [ingresoParaCompletarUte, setIngresoParaCompletarUte] = useState<Ingreso | null>(null);
+  const [error, setError] = useState("");
 
-  // guarda el último ingreso creado para poder encadenar el modal de "falta
-  // la lectura de UTE" justo después de cerrar el aviso de cochera
   const ultimoIngresoCreadoRef = useRef<Ingreso | null>(null);
 
-  const [ingresos, setIngresos] = useState<Ingreso[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEY);
-      return guardado ? JSON.parse(guardado) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [ingresos, setIngresos] = useState<Ingreso[]>([]);
+  const [cargandoIngresos, setCargandoIngresos] = useState(true);
+
+  const cargarIngresos = async () => {
+    const datos = await obtenerIngresosDeDB();
+    setIngresos(datos as unknown as Ingreso[]);
+  };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ingresos));
-  }, [ingresos]);
-
-  useEffect(() => {
-    onListo?.();
+    (async () => {
+      try {
+        setError("");
+        await cargarIngresos();
+      } catch (err) {
+        console.error("Error al cargar ingresos desde Firestore:", err);
+        setError("No se pudieron cargar los ingresos. Revisá tu conexión.");
+      } finally {
+        setCargandoIngresos(false);
+        onListo?.();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activos = ingresos
@@ -335,18 +309,24 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
   const handleAbrirFinalizar = (ingreso: Ingreso) => setIngresoAFinalizar(ingreso);
   const handleAbrirCompletarUte = (ingreso: Ingreso) => setIngresoParaCompletarUte(ingreso);
 
-  const limpiarRegistrosAsociados = (ingreso: Ingreso) => {
+  // Borra en Firestore el contacto y/o vehículo que se crearon automáticamente
+  // al registrar este ingreso (se llama al finalizar o cancelar la estadía).
+  const limpiarRegistrosAsociados = async (ingreso: Ingreso) => {
     if (ingreso.ocupacion !== "inquilino" && ingreso.ocupacion !== "invitado") return;
 
-    if (ingreso.contactoRegistradoId) {
-      guardarContactos(leerContactos().filter((c) => c.id !== ingreso.contactoRegistradoId));
-    }
-    if (ingreso.vehiculoRegistradoId) {
-      guardarVehiculos(leerVehiculos().filter((v) => v.id !== ingreso.vehiculoRegistradoId));
+    try {
+      if (ingreso.contactoRegistradoId) {
+        await eliminarContactoEnDB(ingreso.contactoRegistradoId);
+      }
+      if (ingreso.vehiculoRegistradoId) {
+        await eliminarVehiculoEnDB(ingreso.vehiculoRegistradoId);
+      }
+    } catch (err) {
+      console.error("Error al limpiar contacto/vehículo asociados:", err);
     }
   };
 
-  const handleCrearIngreso = (datos: NuevoIngresoData) => {
+  const handleCrearIngreso = async (datos: NuevoIngresoData) => {
     const yaOcupado = ingresos.find(
       (i) => i.apartamento === datos.apartamento && !i.finalizado && !i.cancelado
     );
@@ -360,67 +340,65 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
 
     const { nombre: nombrePila, apellido } = separarNombreApellido(datos.nombre);
 
-    const nuevoContacto: Contacto = {
-      id: generarId(),
-      nombre: nombrePila || datos.nombre,
-      apellido,
-      apartamento: datos.apartamento || undefined,
-      email: datos.email,
-      telefono: datos.telefono,
-      autor: usuario.nombre,
-      fechaCreacion: new Date().toISOString(),
-    };
-    guardarContactos([...leerContactos(), nuevoContacto]);
-
-    let vehiculoRegistradoId: string | undefined;
-    if (datos.matricula && datos.matricula.trim()) {
-      const nuevoVehiculo: Vehiculo = {
-        id: generarId(),
-        tipo: "auto",
-        matriculaOriginal: datos.matricula.trim().toUpperCase(),
-        matricula: normalizarMatricula(datos.matricula),
-        marca: datos.auto ?? "",
+    try {
+      const nuevoContacto: Omit<Contacto, "id"> = {
         nombre: nombrePila || datos.nombre,
         apellido,
-        apartamento: datos.apartamento,
+        apartamento: datos.apartamento || undefined,
+        email: datos.email,
         telefono: datos.telefono,
-        correo: datos.email,
         autor: usuario.nombre,
         fechaCreacion: new Date().toISOString(),
       };
-      guardarVehiculos([...leerVehiculos(), nuevoVehiculo]);
-      vehiculoRegistradoId = nuevoVehiculo.id;
+      const contactoId = await crearContactoEnDB(nuevoContacto);
+
+      let vehiculoRegistradoId: string | undefined;
+      if (datos.matricula && datos.matricula.trim()) {
+        const nuevoVehiculo: Omit<Vehiculo, "id"> = {
+          tipo: "auto",
+          matriculaOriginal: datos.matricula.trim().toUpperCase(),
+          matricula: normalizarMatricula(datos.matricula),
+          marca: datos.auto ?? "",
+          nombre: nombrePila || datos.nombre,
+          apellido,
+          apartamento: datos.apartamento,
+          telefono: datos.telefono,
+          correo: datos.email,
+          autor: usuario.nombre,
+          fechaCreacion: new Date().toISOString(),
+        };
+        vehiculoRegistradoId = await crearVehiculoEnDB(nuevoVehiculo);
+      }
+
+      const nuevoIngresoData = {
+        ...datos,
+        autor: usuario.nombre,
+        fechaCreacion: new Date().toISOString(),
+        finalizado: false,
+        contactoRegistradoId: contactoId,
+        vehiculoRegistradoId,
+      };
+      const ingresoId = await crearIngresoEnDB(nuevoIngresoData);
+      const nuevoIngreso: Ingreso = { ...nuevoIngresoData, id: ingresoId };
+
+      await cargarIngresos();
+      setModalNuevoAbierto(false);
+
+      if (nuevoIngreso.auto || nuevoIngreso.matricula) {
+        ultimoIngresoCreadoRef.current = nuevoIngreso;
+        setIngresoParaAvisoCochera(nuevoIngreso);
+      } else if (nuevoIngreso.tomaConsumoUte && nuevoIngreso.lecturaUteEntrada === undefined) {
+        setIngresoParaCompletarUte(nuevoIngreso);
+      }
+
+      await crearNotaEnDB({
+        contenido: `Nuevo ingreso depto ${nuevoIngreso.apartamento}: ${nuevoIngreso.nombre} (${OCUPACION_LABEL[nuevoIngreso.ocupacion]}) del ${formatearFecha(nuevoIngreso.fechaIngreso)} al ${formatearFecha(nuevoIngreso.fechaSalida)}`,
+        autor: usuario.nombre,
+      });
+    } catch (err) {
+      console.error("Error al crear el ingreso en Firestore:", err);
+      setError("No se pudo registrar el ingreso. Intentá de nuevo.");
     }
-
-    const nuevoIngreso: Ingreso = {
-      ...datos,
-      id: generarId(),
-      autor: usuario.nombre,
-      fechaCreacion: new Date().toISOString(),
-      finalizado: false,
-      contactoRegistradoId: nuevoContacto.id,
-      vehiculoRegistradoId,
-    };
-    setIngresos((prev) => [...prev, nuevoIngreso]);
-    setModalNuevoAbierto(false);
-
-    // El aviso de cochera solo tiene sentido si de verdad cargó un auto/moto
-    // (tildó "Tiene auto" en el formulario). Si no, saltamos directo al
-    // chequeo de UTE en vez de mostrar un aviso de cochera que no aplica.
-    if (nuevoIngreso.auto || nuevoIngreso.matricula) {
-      ultimoIngresoCreadoRef.current = nuevoIngreso;
-      setIngresoParaAvisoCochera(nuevoIngreso);
-    } else if (nuevoIngreso.tomaConsumoUte && nuevoIngreso.lecturaUteEntrada === undefined) {
-      setIngresoParaCompletarUte(nuevoIngreso);
-    }
-
-    // Nota automática del ingreso nuevo, con el mismo mecanismo de prefijo
-    // destacado que usamos para cancelaciones, pero en verde (NoteCard.tsx
-    // decide el color según el texto del prefijo: "Nuevo ingreso depto...").
-    agregarNotaDesdeIngreso(
-      usuario.nombre,
-      `Nuevo ingreso depto ${nuevoIngreso.apartamento}: ${nuevoIngreso.nombre} (${OCUPACION_LABEL[nuevoIngreso.ocupacion]}) del ${formatearFecha(nuevoIngreso.fechaIngreso)} al ${formatearFecha(nuevoIngreso.fechaSalida)}`
-    );
   };
 
   const handleCerrarAvisoCochera = () => {
@@ -432,75 +410,76 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
     }
   };
 
-  const handleCompletarLecturaUte = (id: string, lectura: number) => {
-    setIngresos((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, lecturaUteEntrada: lectura } : i))
-    );
+  const handleCompletarLecturaUte = async (id: string, lectura: number) => {
+    try {
+      await actualizarIngresoEnDB(id, { lecturaUteEntrada: lectura });
+      await cargarIngresos();
+    } catch (err) {
+      console.error("Error al completar lectura UTE en Firestore:", err);
+      setError("No se pudo guardar la lectura. Intentá de nuevo.");
+    }
     setIngresoParaCompletarUte(null);
   };
 
-  const handleFinalizarIngreso = (
+  const handleFinalizarIngreso = async (
     id: string,
     lecturaUteSalida?: number,
     lecturaUteEntradaSiFaltaba?: number
   ) => {
     const ingreso = ingresos.find((i) => i.id === id);
+    if (!ingreso) return;
 
-    setIngresos((prev) =>
-      prev.map((i) => {
-        if (i.id !== id) return i;
+    const cambios: Partial<Ingreso> = ingreso.tomaConsumoUte
+      ? (() => {
+          const entrada = ingreso.lecturaUteEntrada ?? lecturaUteEntradaSiFaltaba;
+          const importeUte =
+            entrada !== undefined && lecturaUteSalida !== undefined
+              ? (lecturaUteSalida - entrada) * PRECIO_UTE
+              : undefined;
+          return {
+            finalizado: true,
+            lecturaUteEntrada: entrada,
+            lecturaUteSalida,
+            importeUte,
+            fechaFinalizacion: new Date().toISOString(),
+          };
+        })()
+      : { finalizado: true, fechaFinalizacion: new Date().toISOString() };
 
-        if (!i.tomaConsumoUte) {
-          return { ...i, finalizado: true, fechaFinalizacion: new Date().toISOString() };
-        }
-
-        const entrada = i.lecturaUteEntrada ?? lecturaUteEntradaSiFaltaba;
-        const importeUte =
-          entrada !== undefined && lecturaUteSalida !== undefined
-            ? (lecturaUteSalida - entrada) * PRECIO_UTE
-            : undefined;
-
-        return {
-          ...i,
-          finalizado: true,
-          lecturaUteEntrada: entrada,
-          lecturaUteSalida,
-          importeUte,
-          fechaFinalizacion: new Date().toISOString(),
-        };
-      })
-    );
-
-    if (ingreso) {
-      limpiarRegistrosAsociados(ingreso);
+    try {
+      await actualizarIngresoEnDB(id, cambios);
+      await limpiarRegistrosAsociados(ingreso);
+      await cargarIngresos();
+    } catch (err) {
+      console.error("Error al finalizar el ingreso en Firestore:", err);
+      setError("No se pudo finalizar la estadía. Intentá de nuevo.");
     }
 
     setIngresoAFinalizar(null);
   };
 
-  const handleCancelarIngreso = (id: string, motivo: string) => {
+  const handleCancelarIngreso = async (id: string, motivo: string) => {
     const ingreso = ingresos.find((i) => i.id === id);
+    if (!ingreso) return;
 
-    setIngresos((prev) =>
-      prev.map((i) =>
-        i.id === id
-          ? {
-              ...i,
-              finalizado: true,
-              cancelado: true,
-              motivoCancelacion: motivo,
-              fechaFinalizacion: new Date().toISOString(),
-            }
-          : i
-      )
-    );
+    try {
+      await actualizarIngresoEnDB(id, {
+        finalizado: true,
+        cancelado: true,
+        motivoCancelacion: motivo,
+        fechaFinalizacion: new Date().toISOString(),
+      });
 
-    if (ingreso) {
-      agregarNotaDesdeIngreso(
-        usuario.nombre,
-        `Cancela ingreso depto ${ingreso.apartamento}: ${motivo}`
-      );
-      limpiarRegistrosAsociados(ingreso);
+      await crearNotaEnDB({
+        contenido: `Cancela ingreso depto ${ingreso.apartamento}: ${motivo}`,
+        autor: usuario.nombre,
+      });
+
+      await limpiarRegistrosAsociados(ingreso);
+      await cargarIngresos();
+    } catch (err) {
+      console.error("Error al cancelar el ingreso en Firestore:", err);
+      setError("No se pudo cancelar el ingreso. Intentá de nuevo.");
     }
 
     setIngresoAFinalizar(null);
@@ -528,6 +507,8 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         </button>
       </div>
 
+      {error && <p className="mb-4 w-full max-w-3xl text-sm text-red-400">{error}</p>}
+
       <div className="mb-6 flex rounded-xl border border-white/10 bg-white/5 p-1">
         <button
           onClick={() => setTab("activos")}
@@ -548,7 +529,9 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
       </div>
 
       <div className="flex w-full max-w-3xl flex-col gap-4">
-        {listaVisible.length === 0 ? (
+        {cargandoIngresos ? (
+          <p className="text-center text-gray-400">Cargando ingresos…</p>
+        ) : listaVisible.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/10 py-16 text-center text-gray-500">
             <User size={28} />
             <p className="text-sm">

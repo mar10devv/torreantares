@@ -125,3 +125,77 @@ export async function actualizarVehiculoEnDB(vehiculoId, cambios) {
 export async function eliminarVehiculoEnDB(vehiculoId) {
   await deleteDoc(doc(db, "vehiculos", vehiculoId));
 }
+
+// Crea un ingreso nuevo en la colección "ingresos"
+export async function crearIngresoEnDB(ingreso) {
+  const docRef = await addDoc(collection(db, "ingresos"), ingreso);
+  return docRef.id;
+}
+
+// Trae todos los ingresos de la colección "ingresos"
+export async function obtenerIngresosDeDB() {
+  const snapshot = await getDocs(collection(db, "ingresos"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de un ingreso existente (completar lectura UTE,
+// finalizar la estadía, cancelarla, etc.)
+export async function actualizarIngresoEnDB(ingresoId, cambios) {
+  const ingresoRef = doc(db, "ingresos", ingresoId);
+  await updateDoc(ingresoRef, cambios);
+}
+
+// Crea un contacto nuevo en la colección "contactos"
+export async function crearContactoEnDB(contacto) {
+  const docRef = await addDoc(collection(db, "contactos"), contacto);
+  return docRef.id;
+}
+
+// Trae todos los contactos de la colección "contactos"
+export async function obtenerContactosDeDB() {
+  const snapshot = await getDocs(collection(db, "contactos"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de un contacto existente
+export async function actualizarContactoEnDB(contactoId, cambios) {
+  const contactoRef = doc(db, "contactos", contactoId);
+  await updateDoc(contactoRef, cambios);
+}
+
+// Elimina un contacto (manual, o automático al finalizar/cancelar un ingreso)
+export async function eliminarContactoEnDB(contactoId) {
+  await deleteDoc(doc(db, "contactos", contactoId));
+}
+
+// Crea un servicio de terceros nuevo en la colección "servicios"
+export async function crearServicioEnDB(servicio) {
+  const docRef = await addDoc(collection(db, "servicios"), servicio);
+  return docRef.id;
+}
+
+// Trae todos los servicios de terceros de la colección "servicios"
+export async function obtenerServiciosDeDB() {
+  const snapshot = await getDocs(collection(db, "servicios"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de un servicio existente
+export async function actualizarServicioEnDB(servicioId, cambios) {
+  const servicioRef = doc(db, "servicios", servicioId);
+  await updateDoc(servicioRef, cambios);
+}
+
+// Elimina un servicio de terceros
+export async function eliminarServicioEnDB(servicioId) {
+  await deleteDoc(doc(db, "servicios", servicioId));
+}
