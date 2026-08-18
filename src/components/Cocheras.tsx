@@ -12,6 +12,11 @@ import {
   Pencil,
   Bike,
 } from "lucide-react";
+import {
+  crearVehiculoEnDB,
+  obtenerVehiculosDeDB,
+  actualizarVehiculoEnDB,
+} from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -150,7 +155,7 @@ export function buscarCochera(apartamento: string): Cochera | undefined {
 }
 
 /* ---------------------------------------------------------- */
-/* Vehículos registrados (persistidos en localStorage)          */
+/* Vehículos registrados (persistidos en Firestore)             */
 /* ---------------------------------------------------------- */
 
 export interface Vehiculo {
@@ -166,25 +171,6 @@ export interface Vehiculo {
   correo: string;
   autor: string;
   fechaCreacion: string; // ISO
-}
-
-const STORAGE_KEY_VEHICULOS = "torreantares_vehiculos";
-
-// Lectura/escritura exportadas para que otros módulos (como Ingresos) puedan
-// registrar o quitar vehículos sin duplicar la lógica de localStorage acá.
-export function leerVehiculos(): Vehiculo[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const guardado = localStorage.getItem(STORAGE_KEY_VEHICULOS);
-    return guardado ? JSON.parse(guardado) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function guardarVehiculos(lista: Vehiculo[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY_VEHICULOS, JSON.stringify(lista));
 }
 
 // Marcas más comunes en Uruguay, para el autocompletado del campo "Marca".
@@ -244,11 +230,6 @@ export const MARCAS_MOTO = [
   "Jianshe",
 ];
 
-function generarId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 export function normalizarMatricula(matricula: string) {
   return matricula.trim().toUpperCase().replace(/[\s-]/g, "");
 }
@@ -266,52 +247,67 @@ export default function Cocheras({ usuario, onVolver, onListo }: CocherasProps) 
   const [vehiculoEditando, setVehiculoEditando] = useState<Vehiculo | null>(null);
   const [seleccionado, setSeleccionado] = useState<Vehiculo | null>(null);
 
-  const [vehiculos, setVehiculos] = useState<Vehiculo[]>(() => {
-    if (typeof window === "undefined") return [];
+  // Los vehículos ahora viven en Firestore, no en localStorage.
+  const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
+  const [cargandoVehiculos, setCargandoVehiculos] = useState(true);
+  const [errorVehiculos, setErrorVehiculos] = useState("");
+
+  const cargarVehiculos = async () => {
     try {
-      const guardado = localStorage.getItem(STORAGE_KEY_VEHICULOS);
-      return guardado ? JSON.parse(guardado) : [];
-    } catch {
-      return [];
+      setErrorVehiculos("");
+      const datos = await obtenerVehiculosDeDB();
+      setVehiculos(datos as unknown as Vehiculo[]);
+    } catch (err) {
+      console.error("Error al cargar vehículos desde Firestore:", err);
+      setErrorVehiculos("No se pudieron cargar los vehículos. Revisá tu conexión.");
+    } finally {
+      setCargandoVehiculos(false);
     }
-  });
+  };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_VEHICULOS, JSON.stringify(vehiculos));
-  }, [vehiculos]);
-
-  useEffect(() => {
-    // COCHERAS es un array estático y los vehículos salen de localStorage
-    // (sincrónico), así que avisamos que ya está listo apenas se monta.
-    onListo?.();
+    (async () => {
+      await cargarVehiculos();
+      onListo?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleCrearVehiculo = (
+  const handleCrearVehiculo = async (
     datos: Omit<Vehiculo, "id" | "matricula" | "autor" | "fechaCreacion">
   ) => {
-    const nuevo: Vehiculo = {
+    const nuevo = {
       ...datos,
-      id: generarId(),
       matricula: normalizarMatricula(datos.matriculaOriginal),
       autor: usuario.nombre,
       fechaCreacion: new Date().toISOString(),
     };
-    setVehiculos((prev) => [...prev, nuevo]);
-    setModalNuevoAbierto(false);
+
+    try {
+      await crearVehiculoEnDB(nuevo);
+      await cargarVehiculos();
+      setModalNuevoAbierto(false);
+    } catch (err) {
+      console.error("Error al crear vehículo en Firestore:", err);
+      setErrorVehiculos("No se pudo registrar el vehículo. Intentá de nuevo.");
+    }
   };
 
-  const handleEditarVehiculo = (
+  const handleEditarVehiculo = async (
     id: string,
     datos: Omit<Vehiculo, "id" | "matricula" | "autor" | "fechaCreacion">
   ) => {
-    setVehiculos((prev) =>
-      prev.map((v) =>
-        v.id === id
-          ? { ...v, ...datos, matricula: normalizarMatricula(datos.matriculaOriginal) }
-          : v
-      )
-    );
-    setVehiculoEditando(null);
+    try {
+      await actualizarVehiculoEnDB(id, {
+        ...datos,
+        matricula: normalizarMatricula(datos.matriculaOriginal),
+      });
+      await cargarVehiculos();
+      setVehiculoEditando(null);
+    } catch (err) {
+      console.error("Error al editar vehículo en Firestore:", err);
+      setErrorVehiculos("No se pudo guardar la edición. Intentá de nuevo.");
+    }
   };
 
   const query = busqueda.trim();
@@ -368,6 +364,10 @@ export default function Cocheras({ usuario, onVolver, onListo }: CocherasProps) 
         </button>
       </div>
 
+      {errorVehiculos && (
+        <p className="mb-4 w-full max-w-xl text-sm text-red-400">{errorVehiculos}</p>
+      )}
+
       <div className="w-full max-w-xl">
         <p className="mb-2 ml-1 text-sm font-medium text-gray-300">
           Buscar cochera por depto, o vehículo por matrícula/nombre
@@ -422,7 +422,9 @@ export default function Cocheras({ usuario, onVolver, onListo }: CocherasProps) 
             Vehículos registrados{buscoAlgo ? ` (${vehiculosFiltrados.length})` : ""}
           </p>
 
-          {vehiculosFiltrados.length === 0 ? (
+          {cargandoVehiculos ? (
+            <p className="text-center text-sm text-gray-400">Cargando vehículos…</p>
+          ) : vehiculosFiltrados.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/10 py-10 text-center text-gray-500">
               <CarFront size={24} />
               <p className="text-sm">

@@ -6,6 +6,7 @@ import {
   getDocs,
   doc,
   updateDoc,
+  deleteDoc,
   arrayUnion,
   serverTimestamp,
 } from "firebase/firestore";
@@ -97,4 +98,30 @@ export async function obtenerReservasParrilleroDeDB() {
 export async function actualizarReservaParrilleroEnDB(reservaId, cambios) {
   const reservaRef = doc(db, "parrilleros", reservaId);
   await updateDoc(reservaRef, cambios);
+}
+
+// Crea un vehículo nuevo en la colección "vehiculos"
+export async function crearVehiculoEnDB(vehiculo) {
+  const docRef = await addDoc(collection(db, "vehiculos"), vehiculo);
+  return docRef.id;
+}
+
+// Trae todos los vehículos de la colección "vehiculos"
+export async function obtenerVehiculosDeDB() {
+  const snapshot = await getDocs(collection(db, "vehiculos"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de un vehículo existente (ej: editar datos)
+export async function actualizarVehiculoEnDB(vehiculoId, cambios) {
+  const vehiculoRef = doc(db, "vehiculos", vehiculoId);
+  await updateDoc(vehiculoRef, cambios);
+}
+
+// Elimina un vehículo (lo usa Ingresos al finalizar/cancelar una estadía)
+export async function eliminarVehiculoEnDB(vehiculoId) {
+  await deleteDoc(doc(db, "vehiculos", vehiculoId));
 }
