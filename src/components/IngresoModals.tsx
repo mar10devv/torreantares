@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { X, Check, Zap, CarFront, TriangleAlert } from "lucide-react";
 import type { Ingreso, Ocupacion, NuevoIngresoData } from "./Ingresos";
 import { PRECIO_UTE, buscarConflictoDeFechas } from "./Ingresos";
@@ -175,22 +175,6 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
   const [tomaConsumoUte, setTomaConsumoUte] = useState(false);
   const [tieneAuto, setTieneAuto] = useState(false);
   const [enviando, setEnviando] = useState(false);
-
-  // Si cambia el depto (o el ingreso activo de ese depto) y la fecha de
-  // ingreso que ya estaba elegida quedó antes del nuevo mínimo permitido,
-  // la corregimos automáticamente a esa fecha mínima en vez de dejarla
-  // inválida sin que se note.
-  useEffect(() => {
-    const activo = form.apartamento.trim()
-      ? ingresos.find(
-          (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
-        )
-      : undefined;
-    if (activo && form.fechaIngreso && form.fechaIngreso < activo.fechaSalida) {
-      setForm((prev) => ({ ...prev, fechaIngreso: activo.fechaSalida }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.apartamento, ingresos]);
 
   if (!isOpen) return null;
 
