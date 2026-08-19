@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Check, Zap, CarFront, TriangleAlert } from "lucide-react";
 import type { Ingreso, Ocupacion, NuevoIngresoData } from "./Ingresos";
 import { PRECIO_UTE, buscarConflictoDeFechas } from "./Ingresos";
@@ -176,6 +176,22 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
   const [tieneAuto, setTieneAuto] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
+  // Si cambia el depto (o el ingreso activo de ese depto) y la fecha de
+  // ingreso que ya estaba elegida quedó antes del nuevo mínimo permitido,
+  // la corregimos automáticamente a esa fecha mínima en vez de dejarla
+  // inválida sin que se note.
+  useEffect(() => {
+    const activo = form.apartamento.trim()
+      ? ingresos.find(
+          (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
+        )
+      : undefined;
+    if (activo && form.fechaIngreso && form.fechaIngreso < activo.fechaSalida) {
+      setForm((prev) => ({ ...prev, fechaIngreso: activo.fechaSalida }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.apartamento, ingresos]);
+
   if (!isOpen) return null;
 
   // Se recalcula en cada render, en vivo, mientras cambian depto o fecha de
@@ -202,12 +218,23 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     form.fechaSalida.trim() !== "" &&
     form.nombre.trim() !== "" &&
     form.documento.trim() !== "" &&
-    form.domicilio.trim() !== "" &&
     form.codigoPostal.trim() !== "" &&
+    form.domicilio.trim() !== "" &&
     form.ciudad.trim() !== "" &&
     form.email.trim() !== "" &&
     form.telefono.trim() !== "" &&
     form.apartamento.trim() !== "";
+
+  // Si el depto tiene un ingreso activo (sin finalizar ni cancelar), su
+  // fecha de salida es el primer día disponible para un ingreso nuevo. Se
+  // usa como "min" del calendario nativo, así el recepcionista no puede
+  // ni seleccionar un día anterior por error.
+  const ingresoActivoDelDepto = form.apartamento.trim()
+    ? ingresos.find(
+        (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
+      )
+    : undefined;
+  const minFechaIngreso = ingresoActivoDelDepto?.fechaSalida;
 
   const handleClose = () => {
     if (enviando) return;
@@ -333,6 +360,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
               <input
                 type="date"
                 value={form.fechaIngreso}
+                min={minFechaIngreso}
                 onChange={(e) => set("fechaIngreso", e.target.value)}
                 className={campoClass(form.fechaIngreso)}
               />
