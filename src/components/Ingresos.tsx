@@ -113,6 +113,58 @@ function formatearImporte(valor: number) {
   });
 }
 
+// Un depto puede tener varios ingresos a lo largo del tiempo: lo que no
+// puede pasar es que dos se superpongan en fechas. Se considera conflicto
+// si hay un ingreso activo (no finalizado ni cancelado) de ese mismo depto
+// cuya fecha de salida es POSTERIOR a la fecha de ingreso del nuevo — es
+// decir, el nuevo ingreso solo se permite a partir del día en que el
+// anterior termina (mismo día incluido).
+export function buscarConflictoDeFechas(
+  ingresos: Ingreso[],
+  apartamento: string,
+  fechaIngreso: string
+): Ingreso | undefined {
+  return ingresos.find(
+    (i) =>
+      i.apartamento === apartamento &&
+      !i.finalizado &&
+      !i.cancelado &&
+      fechaIngreso < i.fechaSalida
+  );
+}
+
+// Modal genérico para mostrar por qué no se pudo crear un ingreso (depto
+// ocupado en esas fechas, o un error de Firestore). Se muestra por encima
+// del modal "Nuevo ingreso", que se mantiene abierto con los datos que ya
+// se habían cargado.
+function ErrorIngresoModal({ mensaje, onClose }: { mensaje: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+          <AlertTriangle size={22} />
+        </div>
+
+        <h2 className="mt-4 text-lg font-bold text-white">No se pudo registrar el ingreso</h2>
+        <p className="mt-2 text-sm text-gray-300">{mensaje}</p>
+
+        <button
+          onClick={onClose}
+          className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IngresoCard({
   ingreso,
   onFinalizar,
@@ -266,6 +318,7 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
   const [ingresoParaAvisoCochera, setIngresoParaAvisoCochera] = useState<Ingreso | null>(null);
   const [ingresoParaCompletarUte, setIngresoParaCompletarUte] = useState<Ingreso | null>(null);
   const [error, setError] = useState("");
+  const [errorCreacion, setErrorCreacion] = useState<string | null>(null);
 
   const ultimoIngresoCreadoRef = useRef<Ingreso | null>(null);
 
@@ -326,16 +379,17 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
     }
   };
 
-  const handleCrearIngreso = async (datos: NuevoIngresoData) => {
-    const yaOcupado = ingresos.find(
-      (i) => i.apartamento === datos.apartamento && !i.finalizado && !i.cancelado
-    );
-    if (yaOcupado) {
-      window.alert(
-        `El depto ${datos.apartamento} ya tiene un ingreso activo (${yaOcupado.nombre}). ` +
-          `Hay que finalizar o cancelar esa estadía antes de cargar una nueva.`
+  const handleCrearIngreso = async (datos: NuevoIngresoData): Promise<boolean> => {
+    setErrorCreacion(null);
+
+    const conflicto = buscarConflictoDeFechas(ingresos, datos.apartamento, datos.fechaIngreso);
+    if (conflicto) {
+      setErrorCreacion(
+        `El depto ${datos.apartamento} está ocupado por ${conflicto.nombre} hasta el ${formatearFecha(
+          conflicto.fechaSalida
+        )}. Podés registrar un ingreso nuevo a partir de esa fecha.`
       );
-      return;
+      return false;
     }
 
     const { nombre: nombrePila, apellido } = separarNombreApellido(datos.nombre);
@@ -395,9 +449,12 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         contenido: `Nuevo ingreso depto ${nuevoIngreso.apartamento}: ${nuevoIngreso.nombre} (${OCUPACION_LABEL[nuevoIngreso.ocupacion]}) del ${formatearFecha(nuevoIngreso.fechaIngreso)} al ${formatearFecha(nuevoIngreso.fechaSalida)}`,
         autor: usuario.nombre,
       });
+
+      return true;
     } catch (err) {
       console.error("Error al crear el ingreso en Firestore:", err);
-      setError("No se pudo registrar el ingreso. Intentá de nuevo.");
+      setErrorCreacion("No se pudo registrar el ingreso. Revisá tu conexión e intentá de nuevo.");
+      return false;
     }
   };
 
@@ -575,6 +632,10 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
         onClose={() => setIngresoParaCompletarUte(null)}
         onCompletar={handleCompletarLecturaUte}
       />
+
+      {errorCreacion && (
+        <ErrorIngresoModal mensaje={errorCreacion} onClose={() => setErrorCreacion(null)} />
+      )}
     </main>
   );
 }

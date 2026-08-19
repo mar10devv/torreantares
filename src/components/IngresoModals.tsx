@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X, Check, Zap, CarFront, TriangleAlert } from "lucide-react";
 import type { Ingreso, Ocupacion, NuevoIngresoData } from "./Ingresos";
-import { PRECIO_UTE } from "./Ingresos";
+import { PRECIO_UTE, buscarConflictoDeFechas } from "./Ingresos";
 import { buscarCochera, UBICACION_LABEL, MENSAJE_SIN_COCHERA, MarcaInput, MARCAS_AUTO } from "./Cocheras";
 import type { Cochera } from "./Cocheras";
 import {
@@ -115,7 +115,10 @@ function AvisoUte({ apartamento }: { apartamento: string }) {
 }
 
 /* ---------------------------------------------------------- */
-/* Aviso: el depto ya tiene un ingreso activo                   */
+/* Aviso informativo: el depto está ocupado en esas fechas       */
+/* (no bloquea, solo avisa al salir del campo "Apartamento";     */
+/* el chequeo real que decide si se puede crear pasa en el padre,*/
+/* Ingresos.tsx, al confirmar).                                  */
 /* ---------------------------------------------------------- */
 
 function AvisoDeptoOcupadoModal({ ingreso, onClose }: { ingreso: Ingreso; onClose: () => void }) {
@@ -134,11 +137,12 @@ function AvisoDeptoOcupadoModal({ ingreso, onClose }: { ingreso: Ingreso; onClos
 
         <h2 className="mt-4 text-lg font-bold text-white">Depto {ingreso.apartamento} ocupado</h2>
         <p className="mt-2 text-sm text-gray-300">
-          Este depto está siendo ocupado por <span className="font-semibold text-white">{ingreso.nombre}</span>. El
-          ingreso sigue vigente (hasta el {formatearFechaCorta(ingreso.fechaSalida)}).
+          Este depto está siendo ocupado por <span className="font-semibold text-white">{ingreso.nombre}</span> hasta
+          el {formatearFechaCorta(ingreso.fechaSalida)}.
         </p>
         <p className="mt-2 text-sm text-gray-300">
-          Si esa persona ya se retiró, por favor finalizá ese ingreso primero y después volvé a intentarlo acá.
+          Podés registrar este ingreso de todas formas: si la fecha de ingreso que elijas es igual o posterior a esa
+          fecha de salida, se va a poder crear sin problema al confirmar.
         </p>
 
         <button
@@ -161,7 +165,7 @@ interface NewIngresoModalProps {
   onClose: () => void;
   usuario: Usuario;
   ingresos: Ingreso[];
-  onCrear: (datos: NuevoIngresoData) => void;
+  onCrear: (datos: NuevoIngresoData) => Promise<boolean>;
 }
 
 const ESTADO_INICIAL = {
@@ -186,6 +190,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
   const [tomaConsumoUte, setTomaConsumoUte] = useState(false);
   const [tieneAuto, setTieneAuto] = useState(false);
   const [ingresoOcupante, setIngresoOcupante] = useState<Ingreso | null>(null);
+  const [enviando, setEnviando] = useState(false);
 
   if (!isOpen) return null;
 
@@ -214,6 +219,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     form.apartamento.trim() !== "";
 
   const handleClose = () => {
+    if (enviando) return;
     setForm(ESTADO_INICIAL);
     setTomaConsumoUte(false);
     setTieneAuto(false);
@@ -221,19 +227,20 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     onClose();
   };
 
-  // Se dispara al salir del campo "Apartamento": si ese depto ya tiene un
-  // ingreso activo (sin finalizar ni cancelar), avisamos antes de que sigan
-  // completando el resto del formulario. No bloquea la edición — es un
-  // aviso, el bloqueo real pasa recién al confirmar (en Ingresos.tsx).
+  // Se dispara al salir del campo "Apartamento": si ese depto tiene un
+  // ingreso activo que se superpone con la fecha de ingreso actual, avisamos
+  // antes de que sigan completando el resto del formulario. Es solo
+  // informativo — no bloquea la edición ni el envío; la validación real pasa
+  // en el padre (Ingresos.tsx) al confirmar.
   const handleBlurApartamento = () => {
     const valor = form.apartamento.trim();
     if (!valor) return;
 
-    const activo = ingresos.find((i) => i.apartamento === valor && !i.finalizado && !i.cancelado);
-    if (activo) setIngresoOcupante(activo);
+    const conflicto = buscarConflictoDeFechas(ingresos, valor, form.fechaIngreso);
+    if (conflicto) setIngresoOcupante(conflicto);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const faltantes: string[] = [];
     if (!form.nombre.trim()) faltantes.push("Nombre y apellido");
     if (!form.documento.trim()) faltantes.push("Documento de identidad");
@@ -251,18 +258,6 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
 
     if (faltantes.length > 0) {
       window.alert(`Faltan completar los siguientes datos obligatorios:\n\n${faltantes.join("\n")}`);
-      return;
-    }
-
-    // Chequeo de depto ocupado también acá (no solo al salir del campo con
-    // onBlur): si alguien nunca perdió el foco de "Apartamento" o pegó el
-    // valor de otra forma, este es el control que realmente frena la carga,
-    // mostrando el mismo modal en vez de fallar en silencio.
-    const activo = ingresos.find(
-      (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
-    );
-    if (activo) {
-      setIngresoOcupante(activo);
       return;
     }
 
@@ -286,11 +281,20 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
       matricula: tieneAuto ? form.matricula.trim() || undefined : undefined,
     };
 
-    onCrear(datos);
-    setForm(ESTADO_INICIAL);
-    setTomaConsumoUte(false);
-    setTieneAuto(false);
-    setIngresoOcupante(null);
+    // El padre (Ingresos.tsx) decide si se puede crear (conflicto de fechas,
+    // errores de Firestore, etc.) y devuelve si salió bien o no. Si falla,
+    // el padre ya se encarga de mostrar el motivo en su propio modal — acá
+    // solo evitamos perder lo que la persona ya completó.
+    setEnviando(true);
+    const exito = await onCrear(datos);
+    setEnviando(false);
+
+    if (exito) {
+      setForm(ESTADO_INICIAL);
+      setTomaConsumoUte(false);
+      setTieneAuto(false);
+      setIngresoOcupante(null);
+    }
   };
 
   return (
@@ -515,17 +519,18 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
           <div className="mt-2 flex gap-2">
             <button
               onClick={handleClose}
-              className="flex-1 rounded-lg border border-white/10 px-3 py-2.5 text-sm text-white transition hover:bg-white/10"
+              disabled={enviando}
+              className="flex-1 rounded-lg border border-white/10 px-3 py-2.5 text-sm text-white transition hover:bg-white/10 disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               onClick={handleSubmit}
-              disabled={!formCompleto}
+              disabled={!formCompleto || enviando}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-gray-500 disabled:hover:bg-white/10"
             >
               <Check size={16} />
-              Confirmar ingreso
+              {enviando ? "Guardando…" : "Confirmar ingreso"}
             </button>
           </div>
         </div>
