@@ -117,41 +117,26 @@ function AvisoUte({ apartamento }: { apartamento: string }) {
 /* ---------------------------------------------------------- */
 /* Aviso informativo: el depto está ocupado en esas fechas       */
 /* (no bloquea, solo avisa al salir del campo "Apartamento";     */
-/* el chequeo real que decide si se puede crear pasa en el padre,*/
-/* Ingresos.tsx, al confirmar).                                  */
-/* ---------------------------------------------------------- */
-
-function AvisoDeptoOcupadoModal({ ingreso, onClose }: { ingreso: Ingreso; onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-3xl border border-amber-500/30 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
-      >
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
-          <TriangleAlert size={22} />
-        </div>
-
-        <h2 className="mt-4 text-lg font-bold text-white">Depto {ingreso.apartamento} ocupado</h2>
-        <p className="mt-2 text-sm text-gray-300">
-          Este depto está siendo ocupado por <span className="font-semibold text-white">{ingreso.nombre}</span> hasta
-          el {formatearFechaCorta(ingreso.fechaSalida)}.
-        </p>
-        <p className="mt-2 text-sm text-gray-300">
-          Podés registrar este ingreso de todas formas: si la fecha de ingreso que elijas es igual o posterior a esa
-          fecha de salida, se va a poder crear sin problema al confirmar.
-        </p>
-
-        <button
-          onClick={onClose}
-          className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
-        >
-          Entendido
-        </button>
+// Mensaje inline (no modal) que se actualiza en vivo mientras se escribe el
+// depto o se cambia la fecha de ingreso. Rojo si hay conflicto de fechas con
+// un ingreso activo de ese depto, verde si está disponible.
+function EstadoDeptoAviso({ conflicto }: { conflicto: Ingreso | undefined }) {
+  if (conflicto) {
+    return (
+      <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/[0.08] px-3 py-2.5 text-xs leading-relaxed text-red-300">
+        <TriangleAlert size={14} className="mt-0.5 shrink-0" />
+        <span>
+          Este depto está ocupado por <span className="font-semibold">{conflicto.nombre}</span>. Se libera el{" "}
+          <span className="font-semibold">{formatearFechaCorta(conflicto.fechaSalida)}</span>.
+        </span>
       </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5 text-xs leading-relaxed text-emerald-300">
+      <Check size={14} className="mt-0.5 shrink-0" />
+      <span>Depto disponible para esta fecha de ingreso.</span>
     </div>
   );
 }
@@ -189,10 +174,16 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
   const [form, setForm] = useState(ESTADO_INICIAL);
   const [tomaConsumoUte, setTomaConsumoUte] = useState(false);
   const [tieneAuto, setTieneAuto] = useState(false);
-  const [ingresoOcupante, setIngresoOcupante] = useState<Ingreso | null>(null);
   const [enviando, setEnviando] = useState(false);
 
   if (!isOpen) return null;
+
+  // Se recalcula en cada render, en vivo, mientras cambian depto o fecha de
+  // ingreso — no hace falta esperar a salir del campo ni a confirmar.
+  const conflicto =
+    form.apartamento.trim() !== "" && form.fechaIngreso
+      ? buscarConflictoDeFechas(ingresos, form.apartamento.trim(), form.fechaIngreso)
+      : undefined;
 
   const set = (campo: keyof typeof ESTADO_INICIAL, valor: string) =>
     setForm((prev) => ({ ...prev, [campo]: valor }));
@@ -223,21 +214,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     setForm(ESTADO_INICIAL);
     setTomaConsumoUte(false);
     setTieneAuto(false);
-    setIngresoOcupante(null);
     onClose();
-  };
-
-  // Se dispara al salir del campo "Apartamento": si ese depto tiene un
-  // ingreso activo que se superpone con la fecha de ingreso actual, avisamos
-  // antes de que sigan completando el resto del formulario. Es solo
-  // informativo — no bloquea la edición ni el envío; la validación real pasa
-  // en el padre (Ingresos.tsx) al confirmar.
-  const handleBlurApartamento = () => {
-    const valor = form.apartamento.trim();
-    if (!valor) return;
-
-    const conflicto = buscarConflictoDeFechas(ingresos, valor, form.fechaIngreso);
-    if (conflicto) setIngresoOcupante(conflicto);
   };
 
   const handleSubmit = async () => {
@@ -293,7 +270,6 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
       setForm(ESTADO_INICIAL);
       setTomaConsumoUte(false);
       setTieneAuto(false);
-      setIngresoOcupante(null);
     }
   };
 
@@ -314,6 +290,42 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
         </div>
 
         <div className="flex flex-col gap-4">
+          {/* Apartamento y ocupación: primero de todo, para que el aviso de
+              disponibilidad se vea apenas se escribe el depto. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>Apartamento</label>
+              <input
+                type="text"
+                autoFocus
+                value={form.apartamento}
+                onChange={(e) => set("apartamento", e.target.value)}
+                placeholder="N.º de depto"
+                className={
+                  form.apartamento.trim() !== ""
+                    ? conflicto
+                      ? "w-full rounded-lg border border-red-500/50 bg-red-500/[0.05] px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-red-500"
+                      : "w-full rounded-lg border border-emerald-500/40 bg-emerald-500/[0.05] px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+                    : "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+                }
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Ocupación</label>
+              <select
+                value={form.ocupacion}
+                onChange={(e) => set("ocupacion", e.target.value)}
+                className={inputClass}
+              >
+                <option value="inquilino" className="bg-white text-black">Inquilino</option>
+                <option value="invitado" className="bg-white text-black">Invitado</option>
+                <option value="propietario" className="bg-white text-black">Propietario</option>
+              </select>
+            </div>
+          </div>
+
+          {form.apartamento.trim() !== "" && <EstadoDeptoAviso conflicto={conflicto} />}
+
           {/* Fechas */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -412,35 +424,6 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
             </div>
           </div>
 
-          {/* Apartamento y ocupación */}
-          <div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelClass}>Apartamento</label>
-                <input
-                  type="text"
-                  value={form.apartamento}
-                  onChange={(e) => set("apartamento", e.target.value)}
-                  onBlur={handleBlurApartamento}
-                  placeholder="N.º de depto"
-                  className={campoClass(form.apartamento)}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Ocupación</label>
-                <select
-                  value={form.ocupacion}
-                  onChange={(e) => set("ocupacion", e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="inquilino" className="bg-white text-black">Inquilino</option>
-                  <option value="invitado" className="bg-white text-black">Invitado</option>
-                  <option value="propietario" className="bg-white text-black">Propietario</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
           {/* UTE: ahora es opcional, controlado por checkbox */}
           <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
             <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-white">
@@ -535,10 +518,6 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
           </div>
         </div>
       </div>
-
-      {ingresoOcupante && (
-        <AvisoDeptoOcupadoModal ingreso={ingresoOcupante} onClose={() => setIngresoOcupante(null)} />
-      )}
     </div>
   );
 }
