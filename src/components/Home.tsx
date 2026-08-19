@@ -332,7 +332,7 @@ export default function Home() {
 
             <div className="relative z-10 flex w-full flex-1 flex-col items-center">
               <h1 className="mt-20 mb-20 text-6xl font-bold">
-                Torre Antares
+                Torre Antares 2026
               </h1>
 
               <div className="flex flex-1 items-center justify-center w-full">
