@@ -23,9 +23,17 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
+// Firestore rechaza (con error) cualquier campo con valor "undefined" dentro
+// de un objeto. Como varios formularios tienen campos opcionales que quedan
+// undefined si no se completan (auto, matrícula, apartamento, lecturas de
+// UTE, etc.), esta función los saca antes de mandar el objeto a Firestore.
+function limpiarUndefined(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+}
+
 // Crea un usuario nuevo en la colección "usuarios"
 export async function crearUsuarioEnDB({ nombre, cargo, gmail, telefono, contrasena }) {
-  const docRef = await addDoc(collection(db, "usuarios"), {
+  const docRef = await addDoc(collection(db, "usuarios"), limpiarUndefined({
     nombre,
     cargo,
     gmail,
@@ -33,7 +41,7 @@ export async function crearUsuarioEnDB({ nombre, cargo, gmail, telefono, contras
     contrasena,
     accesoAdministracion: false,
     fechaCreacion: serverTimestamp(),
-  });
+  }));
   return docRef.id;
 }
 
@@ -80,7 +88,7 @@ export async function agregarComentarioEnDB(notaId, { contenido, autor }) {
 
 // Crea una reserva de parrillero nueva en la colección "parrilleros"
 export async function crearReservaParrilleroEnDB(reserva) {
-  const docRef = await addDoc(collection(db, "parrilleros"), reserva);
+  const docRef = await addDoc(collection(db, "parrilleros"), limpiarUndefined(reserva));
   return docRef.id;
 }
 
@@ -97,12 +105,12 @@ export async function obtenerReservasParrilleroDeDB() {
 // marcarla como cancelada, etc.)
 export async function actualizarReservaParrilleroEnDB(reservaId, cambios) {
   const reservaRef = doc(db, "parrilleros", reservaId);
-  await updateDoc(reservaRef, cambios);
+  await updateDoc(reservaRef, limpiarUndefined(cambios));
 }
 
 // Crea un vehículo nuevo en la colección "vehiculos"
 export async function crearVehiculoEnDB(vehiculo) {
-  const docRef = await addDoc(collection(db, "vehiculos"), vehiculo);
+  const docRef = await addDoc(collection(db, "vehiculos"), limpiarUndefined(vehiculo));
   return docRef.id;
 }
 
@@ -118,7 +126,7 @@ export async function obtenerVehiculosDeDB() {
 // Actualiza campos puntuales de un vehículo existente (ej: editar datos)
 export async function actualizarVehiculoEnDB(vehiculoId, cambios) {
   const vehiculoRef = doc(db, "vehiculos", vehiculoId);
-  await updateDoc(vehiculoRef, cambios);
+  await updateDoc(vehiculoRef, limpiarUndefined(cambios));
 }
 
 // Elimina un vehículo (lo usa Ingresos al finalizar/cancelar una estadía)
@@ -128,7 +136,7 @@ export async function eliminarVehiculoEnDB(vehiculoId) {
 
 // Crea un ingreso nuevo en la colección "ingresos"
 export async function crearIngresoEnDB(ingreso) {
-  const docRef = await addDoc(collection(db, "ingresos"), ingreso);
+  const docRef = await addDoc(collection(db, "ingresos"), limpiarUndefined(ingreso));
   return docRef.id;
 }
 
@@ -145,12 +153,12 @@ export async function obtenerIngresosDeDB() {
 // finalizar la estadía, cancelarla, etc.)
 export async function actualizarIngresoEnDB(ingresoId, cambios) {
   const ingresoRef = doc(db, "ingresos", ingresoId);
-  await updateDoc(ingresoRef, cambios);
+  await updateDoc(ingresoRef, limpiarUndefined(cambios));
 }
 
 // Crea un contacto nuevo en la colección "contactos"
 export async function crearContactoEnDB(contacto) {
-  const docRef = await addDoc(collection(db, "contactos"), contacto);
+  const docRef = await addDoc(collection(db, "contactos"), limpiarUndefined(contacto));
   return docRef.id;
 }
 
@@ -166,7 +174,7 @@ export async function obtenerContactosDeDB() {
 // Actualiza campos puntuales de un contacto existente
 export async function actualizarContactoEnDB(contactoId, cambios) {
   const contactoRef = doc(db, "contactos", contactoId);
-  await updateDoc(contactoRef, cambios);
+  await updateDoc(contactoRef, limpiarUndefined(cambios));
 }
 
 // Elimina un contacto (manual, o automático al finalizar/cancelar un ingreso)
@@ -176,7 +184,7 @@ export async function eliminarContactoEnDB(contactoId) {
 
 // Crea un servicio de terceros nuevo en la colección "servicios"
 export async function crearServicioEnDB(servicio) {
-  const docRef = await addDoc(collection(db, "servicios"), servicio);
+  const docRef = await addDoc(collection(db, "servicios"), limpiarUndefined(servicio));
   return docRef.id;
 }
 
@@ -192,7 +200,7 @@ export async function obtenerServiciosDeDB() {
 // Actualiza campos puntuales de un servicio existente
 export async function actualizarServicioEnDB(servicioId, cambios) {
   const servicioRef = doc(db, "servicios", servicioId);
-  await updateDoc(servicioRef, cambios);
+  await updateDoc(servicioRef, limpiarUndefined(cambios));
 }
 
 // Elimina un servicio de terceros
