@@ -183,8 +183,12 @@ function NotificacionToast({
   const Icon = estilo.icon;
 
   return (
+    // Antes: bg-[#171b22]/95 + backdrop-blur-2xl. Como estos toasts pueden
+    // apilarse (uno por cada aviso pendiente), cada uno sumaba una capa de
+    // blur más. Subimos un poco la opacidad del fondo sólido para compensar
+    // y que se siga leyendo bien sin blur.
     <div
-      className={`flex w-full max-w-sm items-start gap-3 rounded-2xl border ${estilo.border} bg-[#171b22]/95 p-4 shadow-2xl backdrop-blur-2xl`}
+      className={`flex w-full max-w-sm items-start gap-3 rounded-2xl border ${estilo.border} bg-[#171b22] p-4 shadow-2xl`}
     >
       <button
         onClick={onClick}
@@ -219,18 +223,25 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
 
   return (
     <main className="relative flex min-h-screen flex-col items-center overflow-hidden bg-[#0d1117] px-6 py-30 text-white">
+      {/*
+        Mismo fix que en Home: un solo drop-shadow (antes eran dos
+        encadenados) y sin backdrop-blur-sm a pantalla completa — se
+        reemplaza por un fondo sólido semitransparente, que da un
+        resultado visual similar sin pedirle recomposición constante
+        al navegador.
+      */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-center bg-no-repeat opacity-45"
         style={{
           backgroundImage: `url(${logo.src})`,
           backgroundSize: "42%",
-          filter: "drop-shadow(0 0 55px rgba(255,255,255,0.45)) drop-shadow(0 0 110px rgba(255,255,255,0.2))",
+          filter: "drop-shadow(0 0 70px rgba(255,255,255,0.3))",
         }}
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[#0d1117]/8 backdrop-blur-sm"
+        className="pointer-events-none absolute inset-0 bg-[#0d1117]/60"
       />
 
       <div className="relative z-10 flex w-full flex-col items-center">
@@ -255,13 +266,20 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
           {modulos.map(({ nombre, subtitulo, icon: Icon, color }) => {
             const clases = COLOR_CLASSES[color];
             return (
+              // Antes: backdrop-blur-2xl permanente + transition-all +
+              // hover:scale-105 en el botón, con el ícono de adentro
+              // animando otro scale por separado. Dos transforms anidados
+              // recalculando contra un área con blur activo era el punto
+              // más pesado de toda la pantalla. Ahora: fondo sólido (sin
+              // blur) y transición limitada a las propiedades que
+              // realmente cambian.
               <button
                 key={nombre}
                 onClick={() => onNavigate(nombre)}
-                className={`group flex h-40 flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-4 text-center backdrop-blur-2xl shadow-xl transition-all duration-300 hover:scale-105 hover:bg-white/15 ${clases.border}`}
+                className={`group flex h-40 flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-white/15 ${clases.border}`}
               >
                 <div
-                  className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-transform duration-300 group-hover:scale-110 ${clases.bg} ${clases.text}`}
+                  className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-transform duration-200 ease-out group-hover:scale-110 ${clases.bg} ${clases.text}`}
                 >
                   <Icon size={26} />
                 </div>

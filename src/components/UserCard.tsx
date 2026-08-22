@@ -52,7 +52,18 @@ export default function UserCard({ usuario, onEdit, onDelete, onLogin }: UserCar
   return (
     <div
       onClick={onLogin}
-      className="group relative flex h-48 w-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-white/10 px-4 backdrop-blur-2xl shadow-xl transition-all duration-300 hover:scale-105 hover:border-blue-500/30 hover:bg-white/15"
+      // Antes: backdrop-blur-2xl permanente en cada card + transition-all +
+      // hover:scale-105. El blur activo todo el tiempo ya es costoso con
+      // varias cards en pantalla, y al escalar en hover el navegador tiene
+      // que recalcular esa área de blur en cada frame — ahí se sentía el
+      // lag en GPUs con compositing limitado (Win7 sin drivers al día).
+      //
+      // Ahora: sin backdrop-blur (el "vidrio esmerilado" lo simulamos con
+      // un bg-white/10 sólido, que da un efecto visual muy parecido sin
+      // pedirle nada al compositor), y transiciones específicas en vez de
+      // "all" — solo animamos transform, background-color y border-color,
+      // que son baratas cuando no hay blur de por medio.
+      className="group relative flex h-48 w-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-white/10 px-4 shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:border-blue-500/30 hover:bg-white/15"
     >
       <button
         onClick={(e) => {

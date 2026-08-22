@@ -1,20 +1,27 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import AddUserCard from "./AddUserCard";
 import CreateUserModal from "./CreateUserModal";
 import UserCard from "./UserCard";
-import Dashboard from "./Dashboard";
-import Notas from "./Notas";
-import Parrilleros from "./Parrilleros";
-import Ingresos from "./Ingresos";
-import Cocheras from "./Cocheras";
-import Ute from "./Ute";
-import Administracion from "./Administracion";
-import Contactos from "./Contactos";
-import PropietariosInquilinos from "./PropietariosInquilinos";
 import IngresarPinModal from "./IngresarPinModal";
 import Loader from "./Loader";
 import logo from "../assets/logo.png";
 import { obtenerUsuariosDeDB } from "../lib/firebase";
+
+// Dashboard se carga siempre (es la primera pantalla tras el login),
+// así que lo dejamos como import normal. El resto de las vistas se
+// cargan de forma perezosa: el navegador recién parsea/compila ese
+// código cuando el usuario realmente navega ahí. En hardware limitado
+// (CPU vieja, o simplemente para no tirar de más JS de una), esto baja
+// mucho el trabajo que hay que hacer en el primer render.
+import Dashboard from "./Dashboard";
+const Notas = lazy(() => import("./Notas"));
+const Parrilleros = lazy(() => import("./Parrilleros"));
+const Ingresos = lazy(() => import("./Ingresos"));
+const Cocheras = lazy(() => import("./Cocheras"));
+const Ute = lazy(() => import("./Ute"));
+const Administracion = lazy(() => import("./Administracion"));
+const Contactos = lazy(() => import("./Contactos"));
+const PropietariosInquilinos = lazy(() => import("./PropietariosInquilinos"));
 
 interface Usuario {
   nombre: string;
@@ -289,50 +296,70 @@ export default function Home() {
       <Loader visible={cargando} mensaje={mensajeCarga} />
 
       {usuarioActivo ? (
-        vista === "notas" ? (
-          <Notas usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "parrilleros" ? (
-          <Parrilleros usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "ingresos" ? (
-          <Ingresos usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "residentes" ? (
-          <PropietariosInquilinos usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "cocheras" ? (
-          <Cocheras usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "ute" ? (
-          <Ute usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "administracion" ? (
-          <Administracion usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : vista === "contactos" ? (
-          <Contactos usuario={usuarioActivo} usuarios={usuarios} onVolver={handleVolverAlDashboard} onListo={handleListo} />
-        ) : (
-          <Dashboard
-            usuario={usuarioActivo}
-            onVolver={handleVolver}
-            onNavigate={handleNavigate}
-            onListo={handleListo}
-          />
-        )
+        // Suspense cubre el momento en que un módulo lazy todavía se está
+        // descargando/compilando. El propio Loader ya cubre visualmente
+        // ese lapso porque iniciarCarga() se llama antes de cambiar de
+        // vista, así que acá el fallback casi nunca llega a verse.
+        <Suspense fallback={null}>
+          {vista === "notas" ? (
+            <Notas usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "parrilleros" ? (
+            <Parrilleros usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "ingresos" ? (
+            <Ingresos usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "residentes" ? (
+            <PropietariosInquilinos usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "cocheras" ? (
+            <Cocheras usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "ute" ? (
+            <Ute usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "administracion" ? (
+            <Administracion usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "contactos" ? (
+            <Contactos usuario={usuarioActivo} usuarios={usuarios} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : (
+            <Dashboard
+              usuario={usuarioActivo}
+              onVolver={handleVolver}
+              onNavigate={handleNavigate}
+              onListo={handleListo}
+            />
+          )}
+        </Suspense>
       ) : (
         <>
           <main className="relative flex min-h-screen flex-col items-center overflow-hidden bg-[#0d1117] text-white">
+            {/*
+              Antes había acá dos capas: el logo con doble drop-shadow
+              encadenado, más una capa extra con backdrop-blur-sm a
+              pantalla completa encima. Esa combinación es carísima en
+              GPUs con soporte de compositing limitado (típico en
+              Windows 7, sin drivers actualizados): Chrome puede caer a
+              rasterizar esa capa por software, lo que se siente como
+              lag general aunque la CPU esté sobrada.
+
+              La dejamos en una sola capa: un único drop-shadow (más
+              barato que dos encadenados) y sin backdrop-blur — en su
+              lugar, un fondo semitransparente simple que da un efecto
+              visual muy similar sin pedirle nada al compositor.
+            */}
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-0 bg-center bg-no-repeat opacity-45"
               style={{
                 backgroundImage: `url(${logo.src})`,
                 backgroundSize: "42%",
-                filter: "drop-shadow(0 0 55px rgba(255,255,255,0.45)) drop-shadow(0 0 110px rgba(255,255,255,0.2))",
+                filter: "drop-shadow(0 0 70px rgba(255,255,255,0.3))",
               }}
             />
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 bg-[#0d1117]/8 backdrop-blur-sm"
+              className="pointer-events-none absolute inset-0 bg-[#0d1117]/60"
             />
 
             <div className="relative z-10 flex w-full flex-1 flex-col items-center">
               <h1 className="mt-20 mb-20 text-6xl font-bold">
-                Torre Antares 2026
+                Torre Antares
               </h1>
 
               <div className="flex flex-1 items-center justify-center w-full">
