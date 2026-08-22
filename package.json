@@ -2,6 +2,7 @@
   "name": "proyectoantares",
   "type": "module",
   "version": "0.0.1",
+  "main": "main.cjs",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -9,7 +10,9 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "electron:start": "electron .",
+    "electron:build": "electron-builder"
   },
   "dependencies": {
     "@astrojs/react": "^6.0.1",
@@ -26,8 +29,25 @@
   },
   "devDependencies": {
     "@csstools/postcss-oklab-function": "^5.0.8",
+    "electron": "^22.3.27",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.26",
     "prettier": "^3.9.5",
     "prettier-plugin-astro": "^0.14.1"
+  },
+  "build": {
+    "appId": "com.torreantares.app",
+    "productName": "Torre Antares",
+    "files": [
+      "main.cjs"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
   }
 }
