@@ -218,7 +218,10 @@ export default function Home() {
   };
 
   const handleLogin = (usuario: Usuario) => {
-    iniciarCarga("Iniciando sesión…");
+    // A diferencia de navegar a otro módulo, el Dashboard no tiene fetch
+    // propio — se monta al instante y llama a onListo() de una. Mostrar
+    // el loader acá solo agregaba una espera artificial de 700ms
+    // (LOADER_MIN_MS) sin necesidad real, así que entramos directo.
     setUsuarioActivo(usuario);
     setVista("dashboard");
   };
