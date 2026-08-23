@@ -295,6 +295,12 @@ export default function Home() {
       {/* Se monta una sola vez acá, a nivel raíz de la isla de React */}
       <Loader visible={cargando} mensaje={mensajeCarga} />
 
+      {/* Mismo Loader, reutilizado para la carga inicial de usuarios desde
+          Firestore. Antes esto era un <p>Cargando usuarios…</p> suelto en
+          el medio de la pantalla — ahora usa el loader real de la app,
+          centrado, con su animación ya probada. */}
+      <Loader visible={cargandoUsuarios} mensaje="Cargando base de datos…" />
+
       {usuarioActivo ? (
         // Suspense cubre el momento en que un módulo lazy todavía se está
         // descargando/compilando. El propio Loader ya cubre visualmente
@@ -364,20 +370,11 @@ export default function Home() {
 
               <div className="flex flex-1 items-center justify-center w-full">
                 {cargandoUsuarios ? (
-                  // Skeleton en vez de texto plano: mismas dimensiones que
-                  // UserCard, con un pulso de opacidad (animate-pulse de
-                  // Tailwind — solo anima opacity, es la animación más
-                  // barata que hay, no repite el problema del blur). Así
-                  // el usuario ve de entrada la forma de lo que va a
-                  // aparecer, en vez de un texto perdido en el medio.
-                  <div className="flex flex-wrap justify-center gap-8">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="h-52 w-44 animate-pulse rounded-3xl border border-white/10 bg-white/[0.04]"
-                      />
-                    ))}
-                  </div>
+                  // El Loader de arriba (visible=cargandoUsuarios) ya cubre
+                  // toda la pantalla mientras esto carga, así que acá no
+                  // hace falta renderizar nada — evitamos que quede un
+                  // hueco vacío debajo del loader.
+                  null
                 ) : errorUsuarios ? (
                   <p className="text-red-400">{errorUsuarios}</p>
                 ) : (
