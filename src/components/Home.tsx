@@ -364,7 +364,20 @@ export default function Home() {
 
               <div className="flex flex-1 items-center justify-center w-full">
                 {cargandoUsuarios ? (
-                  <p className="text-gray-300">Cargando usuarios…</p>
+                  // Skeleton en vez de texto plano: mismas dimensiones que
+                  // UserCard, con un pulso de opacidad (animate-pulse de
+                  // Tailwind — solo anima opacity, es la animación más
+                  // barata que hay, no repite el problema del blur). Así
+                  // el usuario ve de entrada la forma de lo que va a
+                  // aparecer, en vez de un texto perdido en el medio.
+                  <div className="flex flex-wrap justify-center gap-8">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="h-52 w-44 animate-pulse rounded-3xl border border-white/10 bg-white/[0.04]"
+                      />
+                    ))}
+                  </div>
                 ) : errorUsuarios ? (
                   <p className="text-red-400">{errorUsuarios}</p>
                 ) : (
