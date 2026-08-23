@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   StickyNote,
   Beef,
@@ -15,6 +15,9 @@ import {
   X,
 } from "lucide-react";
 import logo from "../assets/logo.png";
+import type { Ingreso } from "./Ingresos";
+import type { ReservaParrillero } from "./DayGrillModal";
+import { obtenerIngresosDeDB, obtenerReservasParrilleroDeDB } from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -33,15 +36,69 @@ interface DashboardProps {
 
 type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo";
 
-const COLOR_CLASSES: Record<Color, { bg: string; text: string; border: string }> = {
-  blue: { bg: "bg-blue-500/15", text: "text-blue-400", border: "hover:border-blue-500/30" },
-  orange: { bg: "bg-orange-500/15", text: "text-orange-400", border: "hover:border-orange-500/30" },
-  emerald: { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "hover:border-emerald-500/30" },
-  cyan: { bg: "bg-cyan-500/15", text: "text-cyan-400", border: "hover:border-cyan-500/30" },
-  yellow: { bg: "bg-yellow-500/15", text: "text-yellow-400", border: "hover:border-yellow-500/30" },
-  fuchsia: { bg: "bg-fuchsia-500/15", text: "text-fuchsia-400", border: "hover:border-fuchsia-500/30" },
-  slate: { bg: "bg-slate-500/15", text: "text-slate-300", border: "hover:border-slate-400/30" },
-  indigo: { bg: "bg-indigo-500/15", text: "text-indigo-400", border: "hover:border-indigo-500/30" },
+// Ahora cada color trae también un gradiente (para la franja de acento
+// arriba de cada card, igual que en UserCard) y un glow para el ícono,
+// así el Dashboard usa el mismo lenguaje visual que las cards de login.
+const COLOR_CLASSES: Record<
+  Color,
+  { bg: string; text: string; border: string; gradiente: string; glow: string }
+> = {
+  blue: {
+    bg: "bg-blue-500/15",
+    text: "text-blue-400",
+    border: "hover:border-blue-500/30",
+    gradiente: "from-blue-500 to-blue-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(59,130,246,0.5)]",
+  },
+  orange: {
+    bg: "bg-orange-500/15",
+    text: "text-orange-400",
+    border: "hover:border-orange-500/30",
+    gradiente: "from-orange-500 to-orange-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(249,115,22,0.5)]",
+  },
+  emerald: {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-400",
+    border: "hover:border-emerald-500/30",
+    gradiente: "from-emerald-500 to-emerald-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]",
+  },
+  cyan: {
+    bg: "bg-cyan-500/15",
+    text: "text-cyan-400",
+    border: "hover:border-cyan-500/30",
+    gradiente: "from-cyan-500 to-cyan-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(6,182,212,0.5)]",
+  },
+  yellow: {
+    bg: "bg-yellow-500/15",
+    text: "text-yellow-400",
+    border: "hover:border-yellow-500/30",
+    gradiente: "from-yellow-500 to-yellow-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)]",
+  },
+  fuchsia: {
+    bg: "bg-fuchsia-500/15",
+    text: "text-fuchsia-400",
+    border: "hover:border-fuchsia-500/30",
+    gradiente: "from-fuchsia-500 to-fuchsia-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(217,70,239,0.5)]",
+  },
+  slate: {
+    bg: "bg-slate-500/15",
+    text: "text-slate-300",
+    border: "hover:border-slate-400/30",
+    gradiente: "from-slate-400 to-slate-600",
+    glow: "shadow-[0_0_30px_-10px_rgba(148,163,184,0.4)]",
+  },
+  indigo: {
+    bg: "bg-indigo-500/15",
+    text: "text-indigo-400",
+    border: "hover:border-indigo-500/30",
+    gradiente: "from-indigo-500 to-indigo-700",
+    glow: "shadow-[0_0_30px_-10px_rgba(99,102,241,0.5)]",
+  },
 };
 
 const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; color: Color }[] = [
@@ -55,28 +112,21 @@ const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; co
   { nombre: "Administración", icon: Settings, color: "slate" },
 ];
 
+// Mismo criterio que en UserCard: cada usuario "hereda" un color según
+// su nombre, para que el avatar del header tenga la misma identidad
+// visual que su card en el login.
+const ORDEN_ACENTOS: Color[] = ["blue", "emerald", "orange", "fuchsia", "cyan", "indigo"];
+
+function acentoParaNombre(nombre: string): Color {
+  const hash = nombre
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return ORDEN_ACENTOS[hash % ORDEN_ACENTOS.length];
+}
+
 /* ---------------------------------------------------------- */
 /* Centro de notificaciones                                     */
 /* ---------------------------------------------------------- */
-
-// Solo los campos que necesitamos leer de cada módulo — se leen directo de
-// localStorage (mismo patrón que Ingresos ↔ Contactos/Cocheras) para no
-// tener que importar esos archivos completos acá.
-interface IngresoResumen {
-  id: string;
-  apartamento: string;
-  fechaSalida: string; // YYYY-MM-DD
-  finalizado: boolean;
-  ocupacion: "inquilino" | "invitado" | "propietario";
-}
-
-interface ReservaResumen {
-  id: string;
-  unidad: string;
-  fecha: string; // YYYY-MM-DD
-  pagado: boolean;
-  cancelada: boolean;
-}
 
 type TipoNotificacion = "vence_hoy" | "vencida" | "parrillero_impago";
 
@@ -116,15 +166,20 @@ function hoyISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function leerNotificaciones(): Notificacion[] {
-  if (typeof window === "undefined") return [];
-
+// Antes esto leía de localStorage ("torreantares_ingresos" /
+// "torreantares_parrilleros"), pero esas claves quedaron obsoletas desde
+// que Ingresos.tsx y Parrilleros.tsx migraron a Firestore — por eso las
+// notificaciones solo aparecían en localhost (datos viejos de pruebas
+// que quedaron ahí de antes de la migración) y nunca en producción,
+// donde esa clave nunca se llegó a escribir. Ahora se trae la misma
+// info real desde las mismas colecciones de Firestore que usan esos
+// módulos, así el comportamiento es igual en cualquier PC/instalación.
+async function cargarNotificaciones(): Promise<Notificacion[]> {
   const notificaciones: Notificacion[] = [];
   const hoy = hoyISO();
 
   try {
-    const guardado = localStorage.getItem("torreantares_ingresos");
-    const ingresos: IngresoResumen[] = guardado ? JSON.parse(guardado) : [];
+    const ingresos = (await obtenerIngresosDeDB()) as unknown as Ingreso[];
 
     ingresos.forEach((i) => {
       if (i.finalizado) return;
@@ -144,13 +199,13 @@ function leerNotificaciones(): Notificacion[] {
         });
       }
     });
-  } catch {
+  } catch (err) {
+    console.error("Error al leer ingresos desde Firestore para notificaciones:", err);
     // si falla la lectura, simplemente no mostramos notificaciones de Ingresos
   }
 
   try {
-    const guardado = localStorage.getItem("torreantares_parrilleros");
-    const reservas: ReservaResumen[] = guardado ? JSON.parse(guardado) : [];
+    const reservas = (await obtenerReservasParrilleroDeDB()) as unknown as ReservaParrillero[];
 
     reservas.forEach((r) => {
       if (r.cancelada || r.pagado) return;
@@ -163,7 +218,8 @@ function leerNotificaciones(): Notificacion[] {
         });
       }
     });
-  } catch {
+  } catch (err) {
+    console.error("Error al leer reservas desde Firestore para notificaciones:", err);
     // ídem, no bloquea el resto del dashboard
   }
 
@@ -183,10 +239,6 @@ function NotificacionToast({
   const Icon = estilo.icon;
 
   return (
-    // Antes: bg-[#171b22]/95 + backdrop-blur-2xl. Como estos toasts pueden
-    // apilarse (uno por cada aviso pendiente), cada uno sumaba una capa de
-    // blur más. Subimos un poco la opacidad del fondo sólido para compensar
-    // y que se siga leyendo bien sin blur.
     <div
       className={`flex w-full max-w-sm items-start gap-3 rounded-2xl border ${estilo.border} bg-[#171b22] p-4 shadow-2xl`}
     >
@@ -211,25 +263,23 @@ function NotificacionToast({
 
 export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: DashboardProps) {
   const [descartadas, setDescartadas] = useState<string[]>([]);
-
-  const notificaciones = useMemo(() => leerNotificaciones(), []);
+  const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const notificacionesVisibles = notificaciones.filter((n) => !descartadas.includes(n.id));
 
+  const acentoUsuario = COLOR_CLASSES[acentoParaNombre(usuario.nombre)];
+  const inicialUsuario = usuario.nombre.trim().charAt(0).toUpperCase();
+
   useEffect(() => {
-    // el Dashboard no tiene fetch propio: apenas termina de montarse
-    // (login o "volver" desde un módulo) avisamos que ya está listo.
+    // El Dashboard en sí no tiene fetch propio para renderizarse — avisamos
+    // que ya está listo de inmediato (login/volver siguen siendo
+    // instantáneos). Las notificaciones se traen aparte, en paralelo, y
+    // aparecen solas cuando llegan, sin bloquear ni demorar la entrada.
     onListo?.();
+    cargarNotificaciones().then(setNotificaciones);
   }, []);
 
   return (
     <main className="relative flex min-h-screen flex-col items-center overflow-hidden bg-[#0d1117] px-6 py-30 text-white">
-      {/*
-        Mismo fix que en Home: un solo drop-shadow (antes eran dos
-        encadenados) y sin backdrop-blur-sm a pantalla completa — se
-        reemplaza por un fondo sólido semitransparente, que da un
-        resultado visual similar sin pedirle recomposición constante
-        al navegador.
-      */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-center bg-no-repeat opacity-45"
@@ -246,16 +296,38 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
 
       <div className="relative z-10 flex w-full flex-col items-center">
         <div className="mb-12 flex w-full max-w-4xl items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold">Torre Antares</h1>
-            <p className="mt-2 text-sm text-gray-400">
-              Sesión iniciada como <span className="text-white">{usuario.nombre}</span> · {usuario.cargo}
-            </p>
+          <div className="flex items-center gap-4">
+            {/* El logo ahora también aparece como marca chica junto al
+                título, no solo como watermark gigante de fondo — le da
+                identidad de marca real al header. */}
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-2 shadow-lg">
+              <img src={logo.src} alt="Torre Antares" className="h-full w-full object-contain" />
+            </div>
+
+            <div>
+              <h1 className="text-3xl font-bold leading-tight sm:text-4xl">Torre Antares</h1>
+
+              {/* Chip de usuario: avatar con el mismo color que su
+                  UserCard en el login + nombre + cargo, en vez de una
+                  línea de texto plana. */}
+              <div className="mt-2 flex items-center gap-2">
+                <div
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white ${acentoUsuario.gradiente}`}
+                >
+                  {inicialUsuario}
+                </div>
+                <p className="text-sm text-gray-400">
+                  <span className="font-medium text-white">{usuario.nombre}</span>
+                  {" · "}
+                  <span className={acentoUsuario.text}>{usuario.cargo}</span>
+                </p>
+              </div>
+            </div>
           </div>
 
           <button
             onClick={onVolver}
-            className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white transition hover:bg-white/10"
+            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white shadow-sm transition-colors duration-200 hover:border-white/20 hover:bg-white/10"
           >
             <LogOut size={18} />
             Cambiar usuario
@@ -266,22 +338,20 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
           {modulos.map(({ nombre, subtitulo, icon: Icon, color }) => {
             const clases = COLOR_CLASSES[color];
             return (
-              // Antes: backdrop-blur-2xl permanente + transition-all +
-              // hover:scale-105 en el botón, con el ícono de adentro
-              // animando otro scale por separado. Dos transforms anidados
-              // recalculando contra un área con blur activo era el punto
-              // más pesado de toda la pantalla. Ahora: fondo sólido (sin
-              // blur) y transición limitada a las propiedades que
-              // realmente cambian.
               <button
                 key={nombre}
                 onClick={() => onNavigate(nombre)}
-                className={`group flex h-40 flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-white/15 ${clases.border}`}
+                className={`group relative flex h-40 flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.06] p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-white/10 ${clases.border}`}
               >
+                {/* Franja de acento arriba — mismo lenguaje visual que las
+                    UserCard del login, para que la app se sienta como un
+                    solo diseño coherente en vez de pantallas sueltas. */}
+                <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${clases.gradiente}`} />
+
                 <div
-                  className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-transform duration-200 ease-out group-hover:scale-110 ${clases.bg} ${clases.text}`}
+                  className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-white transition-transform duration-200 ease-out group-hover:scale-110 ${clases.gradiente} ${clases.glow}`}
                 >
-                  <Icon size={26} />
+                  <Icon size={24} />
                 </div>
                 <div>
                   <p className="font-semibold text-white">{nombre}</p>
