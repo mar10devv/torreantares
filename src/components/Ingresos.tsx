@@ -3,6 +3,7 @@ import { ArrowLeft, Plus, User, Car, Phone, Mail, MapPin, Zap, AlertTriangle } f
 import { NewIngresoModal, FinalizarIngresoModal, CocheraAvisoModal, CompletarLecturaUteModal } from "./IngresoModals";
 import { normalizarMatricula, type Vehiculo } from "./Cocheras";
 import type { Contacto } from "./Contactos";
+import { buscarResidenteActivo } from "./PropietariosInquilinos";
 import {
   crearIngresoEnDB,
   obtenerIngresosDeDB,
@@ -12,14 +13,25 @@ import {
   eliminarContactoEnDB,
   crearVehiculoEnDB,
   eliminarVehiculoEnDB,
+  crearResidenteEnDB,
+  actualizarResidenteEnDB,
 } from "../lib/firebase";
 
-export type Ocupacion = "inquilino" | "invitado" | "propietario";
+// "inquilino_anual" se suma al tipo — todavía no tiene lógica propia más
+// allá de mostrarse distinto en la lista (eso lo vamos a construir en un
+// paso aparte). Por ahora solo hace falta que exista como valor válido.
+export type Ocupacion = "inquilino" | "invitado" | "propietario" | "inquilino_anual";
 
 export interface Ingreso {
   id: string;
   fechaIngreso: string; // YYYY-MM-DD
-  fechaSalida: string; // YYYY-MM-DD (estimada)
+  // Antes esto era obligatorio siempre. Ahora puede quedar como "" cuando
+  // ocupacion es "propietario": el dueño entra y sale cuando quiere, no
+  // tiene una fecha de salida fija que registrar. Cualquier lugar del
+  // código que compare esta fecha (vencido, conflicto de fechas,
+  // notificaciones) tiene que tratar "" como "no aplica", nunca como una
+  // fecha real.
+  fechaSalida: string; // YYYY-MM-DD (estimada) — "" si no aplica (propietario)
   nombre: string;
   documento: string;
   domicilio: string;
@@ -82,11 +94,13 @@ const OCUPACION_LABEL: Record<Ocupacion, string> = {
   inquilino: "Inquilino",
   invitado: "Invitado",
   propietario: "Propietario",
+  inquilino_anual: "Inquilino anual",
 };
 
 // El formulario de Ingresos pide "Nombre y apellido" en un solo campo, pero
-// Contactos y Cocheras necesitan nombre/apellido separados. Heurística simple:
-// la primera palabra es el nombre, el resto el apellido.
+// Contactos, Cocheras y Propietarios/Inquilinos necesitan nombre/apellido
+// separados. Heurística simple: la primera palabra es el nombre, el resto
+// el apellido.
 function separarNombreApellido(nombreCompleto: string) {
   const partes = nombreCompleto.trim().split(/\s+/);
   const nombre = partes[0] ?? "";
@@ -119,6 +133,12 @@ function formatearImporte(valor: number) {
 // cuya fecha de salida es POSTERIOR a la fecha de ingreso del nuevo — es
 // decir, el nuevo ingreso solo se permite a partir del día en que el
 // anterior termina (mismo día incluido).
+//
+// Los ingresos de "propietario" pueden no tener fechaSalida (queda "").
+// Por ahora, mientras no definamos las reglas de ocupación para
+// propietarios, estos registros NO participan del chequeo de conflicto —
+// ni bloquean ni son bloqueados por fecha. Es un punto a revisar más
+// adelante si hace falta.
 export function buscarConflictoDeFechas(
   ingresos: Ingreso[],
   apartamento: string,
@@ -129,6 +149,7 @@ export function buscarConflictoDeFechas(
       i.apartamento === apartamento &&
       !i.finalizado &&
       !i.cancelado &&
+      !!i.fechaSalida &&
       fechaIngreso < i.fechaSalida
   );
 }
@@ -176,7 +197,11 @@ function IngresoCard({
 }) {
   const faltaLecturaEntrada = ingreso.tomaConsumoUte && ingreso.lecturaUteEntrada === undefined;
 
-  const vencido = !ingreso.cancelado && !ingreso.finalizado && ingreso.fechaSalida < hoyISO();
+  // !!ingreso.fechaSalida evita que un propietario (que puede no tener
+  // fecha de salida) se marque como "vencido" para siempre — sin esta
+  // guarda, "" < hoyISO() da true (comparación de strings), y quedaría
+  // con el badge ámbar de "venció" apenas se creara.
+  const vencido = !ingreso.cancelado && !ingreso.finalizado && !!ingreso.fechaSalida && ingreso.fechaSalida < hoyISO();
 
   return (
     <div
@@ -220,7 +245,8 @@ function IngresoCard({
 
       <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-gray-400">
         <span>
-          {formatearFecha(ingreso.fechaIngreso)} → {formatearFecha(ingreso.fechaSalida)}
+          {formatearFecha(ingreso.fechaIngreso)}
+          {ingreso.fechaSalida ? ` → ${formatearFecha(ingreso.fechaSalida)}` : " · sin fecha de salida fija"}
         </span>
         {ingreso.telefono && (
           <span className="flex items-center gap-1">
@@ -379,6 +405,45 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
     }
   };
 
+  // Cuando se confirma un ingreso de "propietario" (o "propietario nuevo",
+  // que el modal ya normaliza a "propietario" antes de llegar acá), esos
+  // datos reemplazan/actualizan el registro de Propietarios/Inquilinos
+  // para ese depto. Si ya había un propietario activo ahí, se actualiza
+  // (misma persona volviendo, o corrección de datos); si no había
+  // ninguno, se crea uno nuevo. No bloquea el ingreso si esto falla —
+  // el ingreso en sí ya se guardó bien, esto es un paso secundario.
+  const sincronizarPropietarioEnRegistro = async (
+    nuevoIngreso: Ingreso,
+    nombrePila: string,
+    apellido: string
+  ) => {
+    try {
+      const existente = await buscarResidenteActivo(nuevoIngreso.apartamento, "propietario");
+
+      const datosResidente = {
+        apartamento: nuevoIngreso.apartamento,
+        tipo: "propietario" as const,
+        nombre: nombrePila || nuevoIngreso.nombre,
+        apellido,
+        telefono: nuevoIngreso.telefono,
+        email: nuevoIngreso.email,
+        fechaInicio: existente?.fechaInicio ?? nuevoIngreso.fechaIngreso,
+        activo: true,
+        autor: usuario.nombre,
+        fechaCreacion: existente?.fechaCreacion ?? new Date().toISOString(),
+      };
+
+      if (existente) {
+        await actualizarResidenteEnDB(existente.id, datosResidente);
+      } else {
+        await crearResidenteEnDB(datosResidente);
+      }
+    } catch (err) {
+      console.error("Error al sincronizar el propietario en Propietarios/Inquilinos:", err);
+      // no bloqueamos el ingreso si esto falla
+    }
+  };
+
   const handleCrearIngreso = async (datos: NuevoIngresoData): Promise<boolean> => {
     setErrorCreacion(null);
 
@@ -435,6 +500,13 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
       const ingresoId = await crearIngresoEnDB(nuevoIngresoData);
       const nuevoIngreso: Ingreso = { ...nuevoIngresoData, id: ingresoId };
 
+      // Ver comentario en sincronizarPropietarioEnRegistro — solo aplica
+      // cuando la ocupación final es "propietario" (el modal ya normalizó
+      // "propietario nuevo" a "propietario" antes de llegar acá).
+      if (nuevoIngreso.ocupacion === "propietario") {
+        await sincronizarPropietarioEnRegistro(nuevoIngreso, nombrePila, apellido);
+      }
+
       await cargarIngresos();
       setModalNuevoAbierto(false);
 
@@ -446,7 +518,7 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
       }
 
       await crearNotaEnDB({
-        contenido: `Nuevo ingreso depto ${nuevoIngreso.apartamento}: ${nuevoIngreso.nombre} (${OCUPACION_LABEL[nuevoIngreso.ocupacion]}) del ${formatearFecha(nuevoIngreso.fechaIngreso)} al ${formatearFecha(nuevoIngreso.fechaSalida)}`,
+        contenido: `Nuevo ingreso depto ${nuevoIngreso.apartamento}: ${nuevoIngreso.nombre} (${OCUPACION_LABEL[nuevoIngreso.ocupacion]}) del ${formatearFecha(nuevoIngreso.fechaIngreso)}${nuevoIngreso.fechaSalida ? ` al ${formatearFecha(nuevoIngreso.fechaSalida)}` : ""}`,
         autor: usuario.nombre,
       });
 

@@ -207,3 +207,38 @@ export async function actualizarServicioEnDB(servicioId, cambios) {
 export async function eliminarServicioEnDB(servicioId) {
   await deleteDoc(doc(db, "servicios", servicioId));
 }
+
+/* ---------------------------------------------------------- */
+/* Residentes (propietarios / inquilinos anuales)               */
+/* ---------------------------------------------------------- */
+// Antes esto vivía en localStorage (PropietariosInquilinos.tsx), lo que
+// significaba que cada PC tenía su propia lista, sin compartir nada entre
+// instalaciones — el mismo problema que ya vimos con las notificaciones del
+// Dashboard. Migrado a Firestore para que Ingresos pueda buscar/actualizar
+// estos datos y que todas las PCs vean lo mismo.
+
+// Crea un residente nuevo (propietario o inquilino anual) en la colección "residentes"
+export async function crearResidenteEnDB(residente) {
+  const docRef = await addDoc(collection(db, "residentes"), limpiarUndefined(residente));
+  return docRef.id;
+}
+
+// Trae todos los residentes de la colección "residentes"
+export async function obtenerResidentesDeDB() {
+  const snapshot = await getDocs(collection(db, "residentes"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de un residente existente
+export async function actualizarResidenteEnDB(residenteId, cambios) {
+  const residenteRef = doc(db, "residentes", residenteId);
+  await updateDoc(residenteRef, limpiarUndefined(cambios));
+}
+
+// Elimina un residente
+export async function eliminarResidenteEnDB(residenteId) {
+  await deleteDoc(doc(db, "residentes", residenteId));
+}

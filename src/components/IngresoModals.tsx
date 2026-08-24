@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Check, Zap, CarFront, TriangleAlert } from "lucide-react";
 import type { Ingreso, Ocupacion, NuevoIngresoData } from "./Ingresos";
 import { PRECIO_UTE, buscarConflictoDeFechas } from "./Ingresos";
 import { buscarCochera, UBICACION_LABEL, MENSAJE_SIN_COCHERA, MarcaInput, MARCAS_AUTO } from "./Cocheras";
 import type { Cochera } from "./Cocheras";
+import { buscarResidenteActivo } from "./PropietariosInquilinos";
 import {
   buscarContadorUte,
   calcularTorrePorRecibo,
@@ -18,6 +19,16 @@ interface Usuario {
   telefono: string;
   contrasena: string;
 }
+
+// El selector de ocupación del formulario necesita un valor más que el
+// tipo Ocupacion real ("propietario_nuevo") — es un concepto que solo
+// existe acá, en el formulario: le dice al modal "no autocompletes, dejá
+// los campos vacíos". Al confirmar el ingreso, este valor se normaliza a
+// "propietario" antes de guardarse (ver handleSubmit) — en Firestore
+// nunca queda guardado "propietario_nuevo", porque para todo lo demás
+// (notificaciones, listados, etc.) un propietario nuevo es, ya guardado,
+// un propietario común.
+type OcupacionFormulario = Ocupacion | "propietario_nuevo";
 
 function hoyISO() {
   const d = new Date();
@@ -141,6 +152,43 @@ function EstadoDeptoAviso({ conflicto }: { conflicto: Ingreso | undefined }) {
   );
 }
 
+// Aviso que aparece cuando se elige "Propietario": informa si se
+// encontraron datos guardados en Propietarios/Inquilinos para ese depto
+// (y por lo tanto se autocompletaron) o si no había nada (caso normal).
+function AvisoAutocompletadoPropietario({
+  buscando,
+  encontrado,
+}: {
+  buscando: boolean;
+  encontrado: boolean | null;
+}) {
+  if (buscando) {
+    return (
+      <div className="mt-2 flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-400">
+        Buscando datos del propietario en Propietarios/Inquilinos…
+      </div>
+    );
+  }
+
+  if (encontrado === null) return null;
+
+  if (encontrado) {
+    return (
+      <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-300">
+        <Check size={14} className="mt-0.5 shrink-0" />
+        <span>Se encontraron datos guardados para este depto — se autocompletaron abajo.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-300">
+      <TriangleAlert size={14} className="mt-0.5 shrink-0" />
+      <span>No hay un propietario registrado todavía para este depto. Completá los datos abajo.</span>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------- */
 /* Nuevo ingreso                                                */
 /* ---------------------------------------------------------- */
@@ -165,7 +213,7 @@ const ESTADO_INICIAL = {
   ciudad: "",
   apartamento: "",
   lecturaUteEntrada: "",
-  ocupacion: "inquilino" as Ocupacion,
+  ocupacion: "inquilino" as OcupacionFormulario,
   auto: "",
   matricula: "",
 };
@@ -175,6 +223,70 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
   const [tomaConsumoUte, setTomaConsumoUte] = useState(false);
   const [tieneAuto, setTieneAuto] = useState(false);
   const [enviando, setEnviando] = useState(false);
+
+  // Estado del autocompletado al elegir "Propietario": buscando (mientras
+  // consulta Firestore) y si encontró algo o no, para mostrar el aviso
+  // correspondiente. null = todavía no se buscó nada.
+  const [buscandoPropietario, setBuscandoPropietario] = useState(false);
+  const [propietarioEncontrado, setPropietarioEncontrado] = useState<boolean | null>(null);
+
+  const esTipoPropietario = form.ocupacion === "propietario" || form.ocupacion === "propietario_nuevo";
+
+  // Autocompletado: cada vez que la ocupación es exactamente "propietario"
+  // (no "propietario nuevo") y hay un depto cargado, busca en
+  // Propietarios/Inquilinos. Si encuentra, llena nombre/teléfono/email; si
+  // no encuentra, los deja vacíos — es el caso normal de "todavía no está
+  // registrado", no un error. Con un pequeño debounce para no disparar una
+  // consulta por cada tecla mientras se escribe el depto.
+  useEffect(() => {
+    if (form.ocupacion !== "propietario") {
+      setPropietarioEncontrado(null);
+      return;
+    }
+
+    const depto = form.apartamento.trim();
+    if (!depto) {
+      setPropietarioEncontrado(null);
+      return;
+    }
+
+    let cancelado = false;
+    setBuscandoPropietario(true);
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const residente = await buscarResidenteActivo(depto, "propietario");
+        if (cancelado) return;
+
+        setForm((prev) => ({
+          ...prev,
+          nombre: residente ? `${residente.nombre} ${residente.apellido}`.trim() : "",
+          telefono: residente?.telefono ?? "",
+          email: residente?.email ?? "",
+        }));
+        setPropietarioEncontrado(!!residente);
+      } catch (err) {
+        console.error("Error al buscar propietario en Propietarios/Inquilinos:", err);
+      } finally {
+        if (!cancelado) setBuscandoPropietario(false);
+      }
+    }, 400);
+
+    return () => {
+      cancelado = true;
+      clearTimeout(timeoutId);
+    };
+  }, [form.ocupacion, form.apartamento]);
+
+  // Al pasar a "Propietario nuevo", se limpian nombre/teléfono/email — así
+  // no queda pegado por error el dato de un propietario anterior que se
+  // haya autocompletado antes de cambiar de opción.
+  useEffect(() => {
+    if (form.ocupacion === "propietario_nuevo") {
+      setForm((prev) => ({ ...prev, nombre: "", telefono: "", email: "" }));
+      setPropietarioEncontrado(null);
+    }
+  }, [form.ocupacion]);
 
   if (!isOpen) return null;
 
@@ -196,10 +308,12 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     }`;
 
   // Todos los campos son obligatorios EXCEPTO auto/matrícula (no todos los
-  // inquilinos tienen auto) y la lectura de UTE (se puede cargar después).
+  // inquilinos tienen auto), la lectura de UTE (se puede cargar después),
+  // y la fecha de salida cuando es un propietario (entra y sale cuando
+  // quiere, no tiene una fecha fija que registrar acá).
   const formCompleto =
     form.fechaIngreso.trim() !== "" &&
-    form.fechaSalida.trim() !== "" &&
+    (esTipoPropietario || form.fechaSalida.trim() !== "") &&
     form.nombre.trim() !== "" &&
     form.documento.trim() !== "" &&
     form.codigoPostal.trim() !== "" &&
@@ -218,13 +332,14 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
         (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
       )
     : undefined;
-  const minFechaIngreso = ingresoActivoDelDepto?.fechaSalida;
+  const minFechaIngreso = ingresoActivoDelDepto?.fechaSalida || undefined;
 
   const handleClose = () => {
     if (enviando) return;
     setForm(ESTADO_INICIAL);
     setTomaConsumoUte(false);
     setTieneAuto(false);
+    setPropietarioEncontrado(null);
     onClose();
   };
 
@@ -239,7 +354,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     if (!form.telefono.trim()) faltantes.push("Teléfono");
     if (!form.apartamento.trim()) faltantes.push("Apartamento");
     if (!form.fechaIngreso) faltantes.push("Fecha de ingreso");
-    if (!form.fechaSalida) faltantes.push("Fecha de salida");
+    if (!esTipoPropietario && !form.fechaSalida) faltantes.push("Fecha de salida");
     // Auto/matrícula quedan siempre opcionales (no todos tienen auto), y la
     // lectura de UTE ya NO es obligatoria: si se marcó el check pero no se
     // cargó, se guarda igual y se pide después (modal de "falta la lectura").
@@ -251,9 +366,15 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
 
     const tieneLecturaValida = form.lecturaUteEntrada !== "" && !isNaN(Number(form.lecturaUteEntrada));
 
+    // "propietario_nuevo" es un concepto solo del formulario — se guarda
+    // siempre como "propietario" en Firestore (ver comentario en la
+    // definición de OcupacionFormulario, arriba del todo).
+    const ocupacionFinal: Ocupacion =
+      form.ocupacion === "propietario_nuevo" ? "propietario" : form.ocupacion;
+
     const datos: NuevoIngresoData = {
       fechaIngreso: form.fechaIngreso,
-      fechaSalida: form.fechaSalida,
+      fechaSalida: esTipoPropietario ? "" : form.fechaSalida,
       nombre: form.nombre.trim(),
       documento: form.documento.trim(),
       domicilio: form.domicilio.trim(),
@@ -264,7 +385,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
       apartamento: form.apartamento.trim(),
       tomaConsumoUte,
       lecturaUteEntrada: tomaConsumoUte && tieneLecturaValida ? Number(form.lecturaUteEntrada) : undefined,
-      ocupacion: form.ocupacion,
+      ocupacion: ocupacionFinal,
       auto: tieneAuto ? form.auto.trim() || undefined : undefined,
       matricula: tieneAuto ? form.matricula.trim() || undefined : undefined,
     };
@@ -281,6 +402,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
       setForm(ESTADO_INICIAL);
       setTomaConsumoUte(false);
       setTieneAuto(false);
+      setPropietarioEncontrado(null);
     }
   };
 
@@ -329,15 +451,26 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
                 className={inputClass}
               >
                 <option value="inquilino" className="bg-white text-black">Inquilino</option>
+                <option value="inquilino_anual" className="bg-white text-black">Inquilino anual</option>
                 <option value="invitado" className="bg-white text-black">Invitado</option>
                 <option value="propietario" className="bg-white text-black">Propietario</option>
+                <option value="propietario_nuevo" className="bg-white text-black">Propietario nuevo</option>
               </select>
             </div>
           </div>
 
-          {form.apartamento.trim() !== "" && <EstadoDeptoAviso conflicto={conflicto} />}
+          {form.apartamento.trim() !== "" && !esTipoPropietario && (
+            <EstadoDeptoAviso conflicto={conflicto} />
+          )}
 
-          {/* Fechas */}
+          {form.ocupacion === "propietario" && (
+            <AvisoAutocompletadoPropietario
+              buscando={buscandoPropietario}
+              encontrado={propietarioEncontrado}
+            />
+          )}
+
+          {/* Fechas — la de salida no aplica para propietarios */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelClass}>Fecha de ingreso</label>
@@ -349,18 +482,27 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
                 className={campoClass(form.fechaIngreso)}
               />
             </div>
-            <div>
-              <label className={labelClass}>Fecha de salida</label>
-              <input
-                type="date"
-                value={form.fechaSalida}
-                onChange={(e) => set("fechaSalida", e.target.value)}
-                className={campoClass(form.fechaSalida)}
-              />
-            </div>
+            {esTipoPropietario ? (
+              <div>
+                <label className={labelClass}>Fecha de salida</label>
+                <div className="flex h-[38px] items-center rounded-lg border border-white/10 bg-white/[0.03] px-3 text-xs text-gray-500">
+                  No aplica — entra y sale cuando quiere
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className={labelClass}>Fecha de salida</label>
+                <input
+                  type="date"
+                  value={form.fechaSalida}
+                  onChange={(e) => set("fechaSalida", e.target.value)}
+                  className={campoClass(form.fechaSalida)}
+                />
+              </div>
+            )}
           </div>
 
-          {/* Datos del inquilino */}
+          {/* Datos del inquilino/propietario */}
           <div>
             <label className={labelClass}>Nombre y apellido</label>
             <input

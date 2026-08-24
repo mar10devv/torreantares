@@ -188,6 +188,10 @@ async function cargarNotificaciones(): Promise<Notificacion[]> {
 
     ingresos.forEach((i) => {
       if (i.finalizado) return;
+      // Los propietarios pueden no tener fechaSalida (entran/salen cuando
+      // quieren). Sin esta guarda, "" comparada como fecha generaba
+      // notificaciones de "venció" falsas para cada propietario activo.
+      if (!i.fechaSalida) return;
       if (i.fechaSalida === hoy) {
         notificaciones.push({
           id: `ingreso-hoy-${i.id}`,

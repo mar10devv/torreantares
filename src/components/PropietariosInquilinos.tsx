@@ -16,6 +16,12 @@ import {
   X,
   Check,
 } from "lucide-react";
+import {
+  crearResidenteEnDB,
+  obtenerResidentesDeDB,
+  actualizarResidenteEnDB,
+  eliminarResidenteEnDB,
+} from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -48,17 +54,10 @@ export interface Residente {
   fechaCreacion: string; // ISO
 }
 
-const STORAGE_KEY = "torreantares_residentes";
-
 const TIPO_LABEL: Record<TipoResidente, string> = {
   propietario: "Propietario",
   inquilino: "Inquilino anual",
 };
-
-function generarId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 function hoyISO() {
   const d = new Date();
@@ -81,6 +80,20 @@ function formatearFecha(fecha: string) {
 const inputClass =
   "w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500";
 const labelClass = "mb-1 block text-xs font-medium text-gray-400";
+
+// Usado por Ingresos.tsx: dado un depto y un tipo ("propietario" o
+// "inquilino"), busca si hay un residente ACTIVO cargado en Firestore para
+// esa combinación. Devuelve undefined si no hay nada — no es un error, es
+// el caso normal de "todavía no está registrado".
+export async function buscarResidenteActivo(
+  apartamento: string,
+  tipo: TipoResidente
+): Promise<Residente | undefined> {
+  const datos = (await obtenerResidentesDeDB()) as unknown as Residente[];
+  return datos.find(
+    (r) => r.activo && r.tipo === tipo && r.apartamento === apartamento.trim()
+  );
+}
 
 /* ---------------------------------------------------------- */
 /* Tarjeta de residente con menú de 3 puntitos                  */
@@ -117,7 +130,7 @@ function ResidenteCard({
       <div className="flex items-start gap-4">
         <div
           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${
-            esPropietario ? "bg-emerald-600/20 text-emerald-300" : "bg-blue-600/20 text-blue-300"
+            esPropietario ? "bg-[rgba(16,185,129,0.2)] text-emerald-300" : "bg-[rgba(59,130,246,0.2)] text-blue-300"
           }`}
         >
           {residente.apartamento}
@@ -130,7 +143,7 @@ function ResidenteCard({
             </p>
             <span
               className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                esPropietario ? "bg-emerald-500/15 text-emerald-400" : "bg-blue-500/15 text-blue-400"
+                esPropietario ? "bg-[rgba(16,185,129,0.15)] text-emerald-400" : "bg-[rgba(59,130,246,0.15)] text-blue-400"
               }`}
             >
               {TIPO_LABEL[residente.tipo]}
@@ -233,6 +246,7 @@ function ResidenteModal({
   titulo,
   valoresIniciales,
   bloquearApartamento,
+  enviando,
   onClose,
   onGuardar,
 }: {
@@ -240,6 +254,7 @@ function ResidenteModal({
   valoresIniciales?: Partial<DatosResidenteForm>;
   /** true cuando viene de "Nuevo propietario/inquilino": el depto ya está fijado. */
   bloquearApartamento?: boolean;
+  enviando?: boolean;
   onClose: () => void;
   onGuardar: (datos: DatosResidenteForm) => void;
 }) {
@@ -297,7 +312,8 @@ function ResidenteModal({
             <button
               type="button"
               onClick={() => setTipo("inquilino")}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
+              disabled={bloquearApartamento}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                 tipo === "inquilino" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
               }`}
             >
@@ -307,7 +323,8 @@ function ResidenteModal({
             <button
               type="button"
               onClick={() => setTipo("propietario")}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
+              disabled={bloquearApartamento}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                 tipo === "propietario" ? "bg-emerald-600 text-white" : "text-gray-400 hover:text-white"
               }`}
             >
@@ -389,16 +406,18 @@ function ResidenteModal({
           <div className="mt-2 flex gap-2">
             <button
               onClick={onClose}
-              className="flex-1 rounded-lg border border-white/10 px-3 py-2.5 text-sm text-white transition hover:bg-white/10"
+              disabled={enviando}
+              className="flex-1 rounded-lg border border-white/10 px-3 py-2.5 text-sm text-white transition hover:bg-white/10 disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               onClick={handleConfirmar}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+              disabled={enviando}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
             >
               <Check size={16} />
-              Guardar
+              {enviando ? "Guardando…" : "Guardar"}
             </button>
           </div>
         </div>
@@ -420,59 +439,92 @@ type EstadoModal =
 export default function PropietariosInquilinos({ usuario, onVolver, onListo }: PropietariosInquilinosProps) {
   const [busqueda, setBusqueda] = useState("");
   const [modalEstado, setModalEstado] = useState<EstadoModal>(null);
+  const [enviando, setEnviando] = useState(false);
 
-  const [residentes, setResidentes] = useState<Residente[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEY);
-      return guardado ? JSON.parse(guardado) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [residentes, setResidentes] = useState<Residente[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(residentes));
-  }, [residentes]);
+  const cargarResidentes = async () => {
+    const datos = await obtenerResidentesDeDB();
+    setResidentes(datos as unknown as Residente[]);
+  };
 
   useEffect(() => {
-    // Por ahora se lee de localStorage (sincrónico), así que avisamos que ya
-    // está listo apenas se monta, para cerrar el loader.
-    onListo?.();
+    (async () => {
+      try {
+        setError("");
+        await cargarResidentes();
+      } catch (err) {
+        console.error("Error al cargar residentes desde Firestore:", err);
+        setError("No se pudieron cargar los propietarios/inquilinos. Revisá tu conexión.");
+      } finally {
+        setCargando(false);
+        onListo?.();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleGuardarNuevo = (datos: DatosResidenteForm) => {
-    const nuevo: Residente = {
-      ...datos,
-      id: generarId(),
-      activo: true,
-      autor: usuario.nombre,
-      fechaCreacion: new Date().toISOString(),
-    };
-    setResidentes((prev) => [...prev, nuevo]);
-    setModalEstado(null);
+  const handleGuardarNuevo = async (datos: DatosResidenteForm) => {
+    try {
+      setEnviando(true);
+      await crearResidenteEnDB({
+        ...datos,
+        activo: true,
+        autor: usuario.nombre,
+        fechaCreacion: new Date().toISOString(),
+      });
+      await cargarResidentes();
+      setModalEstado(null);
+    } catch (err) {
+      console.error("Error al crear residente en Firestore:", err);
+      window.alert("No se pudo guardar. Revisá tu conexión e intentá de nuevo.");
+    } finally {
+      setEnviando(false);
+    }
   };
 
-  const handleGuardarEdicion = (id: string, datos: DatosResidenteForm) => {
-    setResidentes((prev) => prev.map((r) => (r.id === id ? { ...r, ...datos } : r)));
-    setModalEstado(null);
+  const handleGuardarEdicion = async (id: string, datos: DatosResidenteForm) => {
+    try {
+      setEnviando(true);
+      await actualizarResidenteEnDB(id, datos);
+      await cargarResidentes();
+      setModalEstado(null);
+    } catch (err) {
+      console.error("Error al editar residente en Firestore:", err);
+      window.alert("No se pudo guardar la edición. Revisá tu conexión e intentá de nuevo.");
+    } finally {
+      setEnviando(false);
+    }
   };
 
-  const handleEliminar = (residente: Residente) => {
+  const handleEliminar = async (residente: Residente) => {
     const confirmado = window.confirm(
       `¿Seguro que querés eliminar el registro de ${residente.nombre} ${residente.apellido} (depto ${residente.apartamento})?`
     );
     if (!confirmado) return;
-    setResidentes((prev) => prev.filter((r) => r.id !== residente.id));
+
+    try {
+      await eliminarResidenteEnDB(residente.id);
+      await cargarResidentes();
+    } catch (err) {
+      console.error("Error al eliminar residente en Firestore:", err);
+      window.alert("No se pudo eliminar. Revisá tu conexión e intentá de nuevo.");
+    }
   };
 
   // Archiva al residente actual (queda con activo:false y fechaFin) y abre
   // el modal para cargar a la persona nueva, con el depto ya precargado.
-  const handleReemplazar = (residente: Residente, nuevoTipo: TipoResidente) => {
-    setResidentes((prev) =>
-      prev.map((r) => (r.id === residente.id ? { ...r, activo: false, fechaFin: hoyISO() } : r))
-    );
-    setModalEstado({ modo: "reemplazo", apartamento: residente.apartamento, tipo: nuevoTipo });
+  const handleReemplazar = async (residente: Residente, nuevoTipo: TipoResidente) => {
+    try {
+      await actualizarResidenteEnDB(residente.id, { activo: false, fechaFin: hoyISO() });
+      await cargarResidentes();
+      setModalEstado({ modo: "reemplazo", apartamento: residente.apartamento, tipo: nuevoTipo });
+    } catch (err) {
+      console.error("Error al archivar residente en Firestore:", err);
+      window.alert("No se pudo procesar el reemplazo. Revisá tu conexión e intentá de nuevo.");
+    }
   };
 
   const query = normalizar(busqueda.trim());
@@ -513,6 +565,8 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         </button>
       </div>
 
+      {error && <p className="mb-4 w-full max-w-2xl text-sm text-red-400">{error}</p>}
+
       <div className="mb-6 w-full max-w-2xl">
         <div className="relative">
           <Search size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -527,7 +581,9 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
       </div>
 
       <div className="flex w-full max-w-2xl flex-col gap-2">
-        {listaOrdenada.length === 0 && (
+        {cargando ? (
+          <p className="text-center text-gray-400">Cargando…</p>
+        ) : listaOrdenada.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/10 py-16 text-center text-gray-500">
             <Home size={28} />
             <p className="text-sm">
@@ -536,27 +592,33 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
                 : "No se encontró nadie con esa búsqueda."}
             </p>
           </div>
+        ) : (
+          listaOrdenada.map((residente) => (
+            <ResidenteCard
+              key={residente.id}
+              residente={residente}
+              onEditar={() => setModalEstado({ modo: "editar", residente })}
+              onEliminar={() => handleEliminar(residente)}
+              onReemplazar={(nuevoTipo) => handleReemplazar(residente, nuevoTipo)}
+            />
+          ))
         )}
-
-        {listaOrdenada.map((residente) => (
-          <ResidenteCard
-            key={residente.id}
-            residente={residente}
-            onEditar={() => setModalEstado({ modo: "editar", residente })}
-            onEliminar={() => handleEliminar(residente)}
-            onReemplazar={(nuevoTipo) => handleReemplazar(residente, nuevoTipo)}
-          />
-        ))}
       </div>
 
       {modalEstado?.modo === "crear" && (
-        <ResidenteModal titulo="Nuevo propietario/inquilino" onClose={() => setModalEstado(null)} onGuardar={handleGuardarNuevo} />
+        <ResidenteModal
+          titulo="Nuevo propietario/inquilino"
+          enviando={enviando}
+          onClose={() => setModalEstado(null)}
+          onGuardar={handleGuardarNuevo}
+        />
       )}
 
       {modalEstado?.modo === "editar" && (
         <ResidenteModal
           titulo="Editar datos"
           valoresIniciales={modalEstado.residente}
+          enviando={enviando}
           onClose={() => setModalEstado(null)}
           onGuardar={(datos) => handleGuardarEdicion(modalEstado.residente.id, datos)}
         />
@@ -567,6 +629,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
           titulo={modalEstado.tipo === "propietario" ? "Nuevo propietario" : "Nuevo inquilino"}
           valoresIniciales={{ apartamento: modalEstado.apartamento, tipo: modalEstado.tipo }}
           bloquearApartamento
+          enviando={enviando}
           onClose={() => setModalEstado(null)}
           onGuardar={handleGuardarNuevo}
         />
