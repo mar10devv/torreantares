@@ -126,19 +126,34 @@ function AvisoUte({ apartamento }: { apartamento: string }) {
 }
 
 /* ---------------------------------------------------------- */
-/* Aviso informativo: el depto está ocupado en esas fechas       */
-/* (no bloquea, solo avisa al salir del campo "Apartamento";     */
+/* Aviso informativo: el depto está ocupado                     */
+/* (se actualiza en vivo mientras se escribe el depto o se       */
+/* cambia la fecha de ingreso; ver EstadoDeptoAviso más abajo)   */
+/* ---------------------------------------------------------- */
 // Mensaje inline (no modal) que se actualiza en vivo mientras se escribe el
-// depto o se cambia la fecha de ingreso. Rojo si hay conflicto de fechas con
-// un ingreso activo de ese depto, verde si está disponible.
+// depto o se cambia la fecha de ingreso. Rojo si hay conflicto con un
+// ingreso activo de ese depto, verde si está disponible. Se muestra para
+// cualquier tipo de ocupación que se esté por crear: lo que importa acá es
+// si el depto está libre, no qué se está por registrar.
 function EstadoDeptoAviso({ conflicto }: { conflicto: Ingreso | undefined }) {
   if (conflicto) {
     return (
       <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/[0.08] px-3 py-2.5 text-xs leading-relaxed text-red-300">
         <TriangleAlert size={14} className="mt-0.5 shrink-0" />
         <span>
-          Este depto está ocupado por <span className="font-semibold">{conflicto.nombre}</span>. Se libera el{" "}
-          <span className="font-semibold">{formatearFechaCorta(conflicto.fechaSalida)}</span>.
+          Este depto está ocupado por <span className="font-semibold">{conflicto.nombre}</span>
+          {conflicto.fechaSalida ? (
+            <>
+              . Se libera el{" "}
+              <span className="font-semibold">{formatearFechaCorta(conflicto.fechaSalida)}</span>.
+            </>
+          ) : (
+            <>
+              {" "}
+              y no tiene fecha de salida fija. Para ingresar a alguien nuevo hay que finalizar esa
+              estadía primero y corroborar que el depto quedó libre.
+            </>
+          )}
         </span>
       </div>
     );
@@ -230,14 +245,28 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
   const [buscandoPropietario, setBuscandoPropietario] = useState(false);
   const [propietarioEncontrado, setPropietarioEncontrado] = useState<boolean | null>(null);
 
+  // "Propietario" y "propietario nuevo" comparten dos comportamientos:
+  // autocompletado desde Propietarios/Inquilinos (solo "propietario", ver
+  // más abajo) y no piden fecha de salida.
   const esTipoPropietario = form.ocupacion === "propietario" || form.ocupacion === "propietario_nuevo";
 
+  // A diferencia de inquilino/invitado, propietario e inquilino_anual no
+  // tienen una fecha de salida fija que registrar acá: el propietario
+  // entra y sale cuando quiere, y el inquilino anual puede renovar,
+  // extenderse o irse antes de cumplir el año — la duración real no se
+  // sabe de antemano. En ambos casos la estadía se finaliza manualmente
+  // desde la lista de ingresos activos, y mientras no se finalice, el
+  // depto queda bloqueado para cualquier ingreso nuevo (ver
+  // buscarConflictoDeFechas en Ingresos.tsx).
+  const sinFechaSalidaFija = esTipoPropietario || form.ocupacion === "inquilino_anual";
+
   // Autocompletado: cada vez que la ocupación es exactamente "propietario"
-  // (no "propietario nuevo") y hay un depto cargado, busca en
-  // Propietarios/Inquilinos. Si encuentra, llena nombre/teléfono/email; si
-  // no encuentra, los deja vacíos — es el caso normal de "todavía no está
-  // registrado", no un error. Con un pequeño debounce para no disparar una
-  // consulta por cada tecla mientras se escribe el depto.
+  // (no "propietario nuevo", ni ningún otro tipo) y hay un depto cargado,
+  // busca en Propietarios/Inquilinos. Si encuentra, llena
+  // nombre/teléfono/email; si no encuentra, los deja vacíos — es el caso
+  // normal de "todavía no está registrado", no un error. Con un pequeño
+  // debounce para no disparar una consulta por cada tecla mientras se
+  // escribe el depto.
   useEffect(() => {
     if (form.ocupacion !== "propietario") {
       setPropietarioEncontrado(null);
@@ -309,11 +338,13 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
 
   // Todos los campos son obligatorios EXCEPTO auto/matrícula (no todos los
   // inquilinos tienen auto), la lectura de UTE (se puede cargar después),
-  // y la fecha de salida cuando es un propietario (entra y sale cuando
-  // quiere, no tiene una fecha fija que registrar acá).
+  // y la fecha de salida cuando es propietario o inquilino anual (no hay
+  // una fecha fija que registrar acá). Tampoco se deja confirmar si el
+  // depto tiene un conflicto activo — hay que finalizar esa estadía antes.
   const formCompleto =
+    !conflicto &&
     form.fechaIngreso.trim() !== "" &&
-    (esTipoPropietario || form.fechaSalida.trim() !== "") &&
+    (sinFechaSalidaFija || form.fechaSalida.trim() !== "") &&
     form.nombre.trim() !== "" &&
     form.documento.trim() !== "" &&
     form.codigoPostal.trim() !== "" &&
@@ -323,10 +354,13 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     form.telefono.trim() !== "" &&
     form.apartamento.trim() !== "";
 
-  // Si el depto tiene un ingreso activo (sin finalizar ni cancelar), su
-  // fecha de salida es el primer día disponible para un ingreso nuevo. Se
-  // usa como "min" del calendario nativo, así el recepcionista no puede
-  // ni seleccionar un día anterior por error.
+  // Si el depto tiene un ingreso activo con fecha de salida conocida, esa
+  // fecha es el primer día disponible para un ingreso nuevo — se usa como
+  // "min" del calendario nativo, así no se puede seleccionar un día
+  // anterior por error. Si el ingreso activo no tiene fecha de salida
+  // (propietario o inquilino anual sin fecha fija), no hay "min" que
+  // ofrecer: en ese caso el bloqueo lo hace formCompleto (vía conflicto),
+  // no el calendario.
   const ingresoActivoDelDepto = form.apartamento.trim()
     ? ingresos.find(
         (i) => i.apartamento === form.apartamento.trim() && !i.finalizado && !i.cancelado
@@ -354,13 +388,24 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
     if (!form.telefono.trim()) faltantes.push("Teléfono");
     if (!form.apartamento.trim()) faltantes.push("Apartamento");
     if (!form.fechaIngreso) faltantes.push("Fecha de ingreso");
-    if (!esTipoPropietario && !form.fechaSalida) faltantes.push("Fecha de salida");
+    if (!sinFechaSalidaFija && !form.fechaSalida) faltantes.push("Fecha de salida");
     // Auto/matrícula quedan siempre opcionales (no todos tienen auto), y la
     // lectura de UTE ya NO es obligatoria: si se marcó el check pero no se
     // cargó, se guarda igual y se pide después (modal de "falta la lectura").
 
     if (faltantes.length > 0) {
       window.alert(`Faltan completar los siguientes datos obligatorios:\n\n${faltantes.join("\n")}`);
+      return;
+    }
+
+    if (conflicto) {
+      window.alert(
+        conflicto.fechaSalida
+          ? `El depto está ocupado por ${conflicto.nombre} hasta el ${formatearFechaCorta(
+              conflicto.fechaSalida
+            )}. Elegí esa fecha o una posterior.`
+          : `El depto está ocupado por ${conflicto.nombre} y no tiene fecha de salida fija. Hay que finalizar esa estadía antes de crear un ingreso nuevo.`
+      );
       return;
     }
 
@@ -374,7 +419,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
 
     const datos: NuevoIngresoData = {
       fechaIngreso: form.fechaIngreso,
-      fechaSalida: esTipoPropietario ? "" : form.fechaSalida,
+      fechaSalida: sinFechaSalidaFija ? "" : form.fechaSalida,
       nombre: form.nombre.trim(),
       documento: form.documento.trim(),
       domicilio: form.domicilio.trim(),
@@ -390,9 +435,9 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
       matricula: tieneAuto ? form.matricula.trim() || undefined : undefined,
     };
 
-    // El padre (Ingresos.tsx) decide si se puede crear (conflicto de fechas,
-    // errores de Firestore, etc.) y devuelve si salió bien o no. Si falla,
-    // el padre ya se encarga de mostrar el motivo en su propio modal — acá
+    // El padre (Ingresos.tsx) vuelve a chequear conflicto de fechas y
+    // errores de Firestore, y devuelve si salió bien o no. Si falla, el
+    // padre ya se encarga de mostrar el motivo en su propio modal — acá
     // solo evitamos perder lo que la persona ya completó.
     setEnviando(true);
     const exito = await onCrear(datos);
@@ -459,9 +504,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
             </div>
           </div>
 
-          {form.apartamento.trim() !== "" && !esTipoPropietario && (
-            <EstadoDeptoAviso conflicto={conflicto} />
-          )}
+          {form.apartamento.trim() !== "" && <EstadoDeptoAviso conflicto={conflicto} />}
 
           {form.ocupacion === "propietario" && (
             <AvisoAutocompletadoPropietario
@@ -470,7 +513,7 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
             />
           )}
 
-          {/* Fechas — la de salida no aplica para propietarios */}
+          {/* Fechas — la de salida no aplica para propietario ni inquilino anual */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelClass}>Fecha de ingreso</label>
@@ -482,11 +525,13 @@ export function NewIngresoModal({ isOpen, onClose, usuario, ingresos, onCrear }:
                 className={campoClass(form.fechaIngreso)}
               />
             </div>
-            {esTipoPropietario ? (
+            {sinFechaSalidaFija ? (
               <div>
                 <label className={labelClass}>Fecha de salida</label>
                 <div className="flex h-[38px] items-center rounded-lg border border-white/10 bg-white/[0.03] px-3 text-xs text-gray-500">
-                  No aplica — entra y sale cuando quiere
+                  {esTipoPropietario
+                    ? "No aplica — entra y sale cuando quiere"
+                    : "No aplica — se finaliza manualmente al terminar el contrato"}
                 </div>
               </div>
             ) : (

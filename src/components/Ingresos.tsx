@@ -26,12 +26,13 @@ export interface Ingreso {
   id: string;
   fechaIngreso: string; // YYYY-MM-DD
   // Antes esto era obligatorio siempre. Ahora puede quedar como "" cuando
-  // ocupacion es "propietario": el dueño entra y sale cuando quiere, no
-  // tiene una fecha de salida fija que registrar. Cualquier lugar del
-  // código que compare esta fecha (vencido, conflicto de fechas,
-  // notificaciones) tiene que tratar "" como "no aplica", nunca como una
-  // fecha real.
-  fechaSalida: string; // YYYY-MM-DD (estimada) — "" si no aplica (propietario)
+  // ocupacion es "propietario" o "inquilino_anual": el dueño entra y sale
+  // cuando quiere, y el inquilino anual puede renovar/extenderse/irse
+  // antes — en ambos casos no hay una fecha de salida fija que registrar
+  // acá, la estadía se finaliza manualmente. Cualquier lugar del código
+  // que compare esta fecha (vencido, conflicto de fechas, notificaciones)
+  // tiene que tratar "" como "no aplica", nunca como una fecha real.
+  fechaSalida: string; // YYYY-MM-DD (estimada) — "" si no aplica (propietario / inquilino anual)
   nombre: string;
   documento: string;
   domicilio: string;
@@ -128,17 +129,16 @@ function formatearImporte(valor: number) {
 }
 
 // Un depto puede tener varios ingresos a lo largo del tiempo: lo que no
-// puede pasar es que dos se superpongan en fechas. Se considera conflicto
-// si hay un ingreso activo (no finalizado ni cancelado) de ese mismo depto
-// cuya fecha de salida es POSTERIOR a la fecha de ingreso del nuevo — es
-// decir, el nuevo ingreso solo se permite a partir del día en que el
-// anterior termina (mismo día incluido).
+// puede pasar es que dos se superpongan. Un ingreso activo (no finalizado
+// ni cancelado) de ese mismo depto bloquea la creación de uno nuevo así:
 //
-// Los ingresos de "propietario" pueden no tener fechaSalida (queda "").
-// Por ahora, mientras no definamos las reglas de ocupación para
-// propietarios, estos registros NO participan del chequeo de conflicto —
-// ni bloquean ni son bloqueados por fecha. Es un punto a revisar más
-// adelante si hace falta.
+// - Si tiene fechaSalida (inquilino, invitado, inquilino_anual con fecha
+//   cargada): bloquea hasta esa fecha — el nuevo ingreso se permite a
+//   partir del día en que el anterior termina (mismo día incluido).
+// - Si NO tiene fechaSalida (propietario, o inquilino_anual sin fecha
+//   fija): bloquea SIEMPRE, sin importar qué fecha se elija para el
+//   ingreso nuevo, hasta que la estadía activa se finalice manualmente
+//   desde la lista de ingresos.
 export function buscarConflictoDeFechas(
   ingresos: Ingreso[],
   apartamento: string,
@@ -149,15 +149,14 @@ export function buscarConflictoDeFechas(
       i.apartamento === apartamento &&
       !i.finalizado &&
       !i.cancelado &&
-      !!i.fechaSalida &&
-      fechaIngreso < i.fechaSalida
+      (!i.fechaSalida || fechaIngreso < i.fechaSalida)
   );
 }
 
 // Modal genérico para mostrar por qué no se pudo crear un ingreso (depto
-// ocupado en esas fechas, o un error de Firestore). Se muestra por encima
-// del modal "Nuevo ingreso", que se mantiene abierto con los datos que ya
-// se habían cargado.
+// ocupado, o un error de Firestore). Se muestra por encima del modal
+// "Nuevo ingreso", que se mantiene abierto con los datos que ya se habían
+// cargado.
 function ErrorIngresoModal({ mensaje, onClose }: { mensaje: string; onClose: () => void }) {
   return (
     <div
@@ -197,10 +196,10 @@ function IngresoCard({
 }) {
   const faltaLecturaEntrada = ingreso.tomaConsumoUte && ingreso.lecturaUteEntrada === undefined;
 
-  // !!ingreso.fechaSalida evita que un propietario (que puede no tener
-  // fecha de salida) se marque como "vencido" para siempre — sin esta
-  // guarda, "" < hoyISO() da true (comparación de strings), y quedaría
-  // con el badge ámbar de "venció" apenas se creara.
+  // !!ingreso.fechaSalida evita que un propietario o inquilino anual (que
+  // pueden no tener fecha de salida) se marquen como "vencidos" para
+  // siempre — sin esta guarda, "" < hoyISO() da true (comparación de
+  // strings), y quedaría con el badge ámbar de "venció" apenas se creara.
   const vencido = !ingreso.cancelado && !ingreso.finalizado && !!ingreso.fechaSalida && ingreso.fechaSalida < hoyISO();
 
   return (
@@ -449,10 +448,19 @@ export default function Ingresos({ usuario, onVolver, onListo }: IngresosProps) 
 
     const conflicto = buscarConflictoDeFechas(ingresos, datos.apartamento, datos.fechaIngreso);
     if (conflicto) {
+      // El conflicto puede venir de un ingreso CON fecha de salida
+      // (inquilino, invitado, inquilino anual con fecha cargada) o SIN
+      // ella (propietario, inquilino anual sin fecha fija). En el primer
+      // caso se le puede decir a partir de cuándo se libera; en el
+      // segundo no hay fecha que ofrecer, hay que finalizar manualmente.
       setErrorCreacion(
-        `El depto ${datos.apartamento} está ocupado por ${conflicto.nombre} hasta el ${formatearFecha(
-          conflicto.fechaSalida
-        )}. Podés registrar un ingreso nuevo a partir de esa fecha.`
+        conflicto.fechaSalida
+          ? `El depto ${datos.apartamento} está ocupado por ${conflicto.nombre} hasta el ${formatearFecha(
+              conflicto.fechaSalida
+            )}. Podés registrar un ingreso nuevo a partir de esa fecha.`
+          : `El depto ${datos.apartamento} está ocupado por ${conflicto.nombre} (${
+              OCUPACION_LABEL[conflicto.ocupacion]
+            }) y no tiene fecha de salida fija. Primero hay que finalizar esa estadía desde la lista de ingresos activos y corroborar que el depto quedó libre.`
       );
       return false;
     }
