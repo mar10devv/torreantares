@@ -266,10 +266,60 @@ function NotificacionToast({
   );
 }
 
+function ModuloEnDesarrolloModal({
+  nombre,
+  onClose,
+}: {
+  nombre: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(0,0,0,0.7)] p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-3xl border border-[rgba(255,255,255,0.1)] bg-[#171b22] p-6 text-center shadow-2xl"
+      >
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(148,163,184,0.15)] text-slate-300">
+          <Settings size={22} />
+        </div>
+
+        <h2 className="mt-4 text-lg font-bold text-white">{nombre} — todavía no disponible</h2>
+        <p className="mt-2 text-sm text-gray-400">
+          Este módulo sigue en desarrollo. Pronto vas a poder usarlo desde acá.
+        </p>
+
+        <button
+          onClick={onClose}
+          className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: DashboardProps) {
   const [descartadas, setDescartadas] = useState<string[]>([]);
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
+  const [moduloEnDesarrollo, setModuloEnDesarrollo] = useState<string | null>(null);
   const notificacionesVisibles = notificaciones.filter((n) => !descartadas.includes(n.id));
+
+  // Módulos que todavía no están listos para usarse: en vez de navegar,
+  // se muestra un aviso. Para volver a habilitar uno, alcanza con
+  // sacarlo de este set.
+  const MODULOS_NO_DISPONIBLES = new Set(["Administración"]);
+
+  const handleClickModulo = (nombre: string) => {
+    if (MODULOS_NO_DISPONIBLES.has(nombre)) {
+      setModuloEnDesarrollo(nombre);
+      return;
+    }
+    onNavigate(nombre);
+  };
 
   const acentoUsuario = COLOR_CLASSES[acentoParaNombre(usuario.nombre)];
   const inicialUsuario = usuario.nombre.trim().charAt(0).toUpperCase();
@@ -342,16 +392,23 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
         <div className="grid w-full max-w-4xl grid-cols-2 gap-6 sm:grid-cols-3">
           {modulos.map(({ nombre, subtitulo, icon: Icon, color }) => {
             const clases = COLOR_CLASSES[color];
+            const noDisponible = MODULOS_NO_DISPONIBLES.has(nombre);
             return (
               <button
                 key={nombre}
-                onClick={() => onNavigate(nombre)}
-                className={`group relative flex h-40 flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.06)] p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-[rgba(255,255,255,0.1)] ${clases.border}`}
+                onClick={() => handleClickModulo(nombre)}
+                className={`group relative flex h-40 flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.06)] p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-[rgba(255,255,255,0.1)] ${clases.border} ${noDisponible ? "opacity-60" : ""}`}
               >
                 {/* Franja de acento arriba — mismo lenguaje visual que las
                     UserCard del login, para que la app se sienta como un
                     solo diseño coherente en vez de pantallas sueltas. */}
                 <div className={`absolute inset-x-0 top-0 h-1 ${clases.gradiente}`} />
+
+                {noDisponible && (
+                  <span className="absolute right-2 top-4 rounded-full bg-[rgba(255,255,255,0.1)] px-2 py-0.5 text-[10px] font-medium text-gray-300">
+                    Próximamente
+                  </span>
+                )}
 
                 <div
                   className={`flex h-14 w-14 items-center justify-center rounded-2xl text-white transition-transform duration-200 ease-out group-hover:scale-110 ${clases.gradiente} ${clases.glow}`}
@@ -369,6 +426,13 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
           })}
         </div>
       </div>
+
+      {moduloEnDesarrollo && (
+        <ModuloEnDesarrolloModal
+          nombre={moduloEnDesarrollo}
+          onClose={() => setModuloEnDesarrollo(null)}
+        />
+      )}
 
       {notificacionesVisibles.length > 0 && (
         <div className="fixed bottom-4 right-4 z-40 flex w-full max-w-sm flex-col gap-3">
