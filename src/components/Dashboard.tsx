@@ -36,67 +36,72 @@ interface DashboardProps {
 
 type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo";
 
-// Ahora cada color trae también un gradiente (para la franja de acento
-// arriba de cada card, igual que en UserCard) y un glow para el ícono,
-// así el Dashboard usa el mismo lenguaje visual que las cards de login.
+// IMPORTANTE — por qué acá no usamos from-blue-500/to-blue-700 ni bg-blue-500/15:
+// Tailwind v4 compila esas clases con color-mix(in oklab, ...) por debajo,
+// una función de CSS que Chrome recién soportó desde la v111 — distinta de
+// oklch() (que ya solucionamos con el plugin de PostCSS). La PC de trabajo
+// tiene Chrome 109, así que sigue descartando estas declaraciones aunque
+// oklch() ya esté arreglado. Se reemplaza todo por valores arbitrarios de
+// Tailwind (bg-[rgba(...)], bg-[linear-gradient(...)]) que generan CSS
+// plano sin pasar por oklch() ni color-mix() en ningún punto.
 const COLOR_CLASSES: Record<
   Color,
   { bg: string; text: string; border: string; gradiente: string; glow: string }
 > = {
   blue: {
-    bg: "bg-blue-500/15",
+    bg: "bg-[rgba(59,130,246,0.15)]",
     text: "text-blue-400",
-    border: "hover:border-blue-500/30",
-    gradiente: "from-blue-500 to-blue-700",
+    border: "hover:border-[rgba(59,130,246,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#3b82f6,#1d4ed8)]",
     glow: "shadow-[0_0_30px_-10px_rgba(59,130,246,0.5)]",
   },
   orange: {
-    bg: "bg-orange-500/15",
+    bg: "bg-[rgba(249,115,22,0.15)]",
     text: "text-orange-400",
-    border: "hover:border-orange-500/30",
-    gradiente: "from-orange-500 to-orange-700",
+    border: "hover:border-[rgba(249,115,22,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#f97316,#c2410c)]",
     glow: "shadow-[0_0_30px_-10px_rgba(249,115,22,0.5)]",
   },
   emerald: {
-    bg: "bg-emerald-500/15",
+    bg: "bg-[rgba(16,185,129,0.15)]",
     text: "text-emerald-400",
-    border: "hover:border-emerald-500/30",
-    gradiente: "from-emerald-500 to-emerald-700",
+    border: "hover:border-[rgba(16,185,129,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#10b981,#047857)]",
     glow: "shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]",
   },
   cyan: {
-    bg: "bg-cyan-500/15",
+    bg: "bg-[rgba(6,182,212,0.15)]",
     text: "text-cyan-400",
-    border: "hover:border-cyan-500/30",
-    gradiente: "from-cyan-500 to-cyan-700",
+    border: "hover:border-[rgba(6,182,212,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#06b6d4,#0e7490)]",
     glow: "shadow-[0_0_30px_-10px_rgba(6,182,212,0.5)]",
   },
   yellow: {
-    bg: "bg-yellow-500/15",
+    bg: "bg-[rgba(234,179,8,0.15)]",
     text: "text-yellow-400",
-    border: "hover:border-yellow-500/30",
-    gradiente: "from-yellow-500 to-yellow-700",
+    border: "hover:border-[rgba(234,179,8,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#eab308,#a16207)]",
     glow: "shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)]",
   },
   fuchsia: {
-    bg: "bg-fuchsia-500/15",
+    bg: "bg-[rgba(217,70,239,0.15)]",
     text: "text-fuchsia-400",
-    border: "hover:border-fuchsia-500/30",
-    gradiente: "from-fuchsia-500 to-fuchsia-700",
+    border: "hover:border-[rgba(217,70,239,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#d946ef,#a21caf)]",
     glow: "shadow-[0_0_30px_-10px_rgba(217,70,239,0.5)]",
   },
   slate: {
-    bg: "bg-slate-500/15",
+    bg: "bg-[rgba(148,163,184,0.15)]",
     text: "text-slate-300",
-    border: "hover:border-slate-400/30",
-    gradiente: "from-slate-400 to-slate-600",
+    border: "hover:border-[rgba(148,163,184,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#94a3b8,#475569)]",
     glow: "shadow-[0_0_30px_-10px_rgba(148,163,184,0.4)]",
   },
   indigo: {
-    bg: "bg-indigo-500/15",
+    bg: "bg-[rgba(99,102,241,0.15)]",
     text: "text-indigo-400",
-    border: "hover:border-indigo-500/30",
-    gradiente: "from-indigo-500 to-indigo-700",
+    border: "hover:border-[rgba(99,102,241,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#6366f1,#4338ca)]",
     glow: "shadow-[0_0_30px_-10px_rgba(99,102,241,0.5)]",
   },
 };
@@ -143,21 +148,21 @@ const NOTIF_ESTILOS: Record<
 > = {
   vence_hoy: {
     icon: Bell,
-    iconBg: "bg-amber-500/15",
+    iconBg: "bg-[rgba(245,158,11,0.15)]",
     iconColor: "text-amber-400",
-    border: "border-amber-500/25",
+    border: "border-[rgba(245,158,11,0.25)]",
   },
   vencida: {
     icon: TriangleAlert,
-    iconBg: "bg-red-500/15",
+    iconBg: "bg-[rgba(239,68,68,0.15)]",
     iconColor: "text-red-400",
-    border: "border-red-500/25",
+    border: "border-[rgba(239,68,68,0.25)]",
   },
   parrillero_impago: {
     icon: CircleDollarSign,
-    iconBg: "bg-orange-500/15",
+    iconBg: "bg-[rgba(249,115,22,0.15)]",
     iconColor: "text-orange-400",
-    border: "border-orange-500/25",
+    border: "border-[rgba(249,115,22,0.25)]",
   },
 };
 
@@ -253,7 +258,7 @@ function NotificacionToast({
       </button>
       <button
         onClick={onCerrar}
-        className="shrink-0 rounded-full p-1 text-gray-500 transition hover:bg-white/10 hover:text-white"
+        className="shrink-0 rounded-full p-1 text-gray-500 transition hover:bg-[rgba(255,255,255,0.1)] hover:text-white"
       >
         <X size={16} />
       </button>
@@ -291,7 +296,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[#0d1117]/60"
+        className="pointer-events-none absolute inset-0 bg-[rgba(13,17,23,0.6)]"
       />
 
       <div className="relative z-10 flex w-full flex-col items-center">
@@ -300,7 +305,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
             {/* El logo ahora también aparece como marca chica junto al
                 título, no solo como watermark gigante de fondo — le da
                 identidad de marca real al header. */}
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-2 shadow-lg">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] p-2 shadow-lg">
               <img src={logo.src} alt="Torre Antares" className="h-full w-full object-contain" />
             </div>
 
@@ -312,7 +317,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
                   línea de texto plana. */}
               <div className="mt-2 flex items-center gap-2">
                 <div
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white ${acentoUsuario.gradiente}`}
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${acentoUsuario.gradiente}`}
                 >
                   {inicialUsuario}
                 </div>
@@ -327,7 +332,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
 
           <button
             onClick={onVolver}
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white shadow-sm transition-colors duration-200 hover:border-white/20 hover:bg-white/10"
+            className="flex items-center gap-2 rounded-xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] px-4 py-2.5 text-sm text-white shadow-sm transition-colors duration-200 hover:border-[rgba(255,255,255,0.2)] hover:bg-[rgba(255,255,255,0.1)]"
           >
             <LogOut size={18} />
             Cambiar usuario
@@ -341,15 +346,15 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
               <button
                 key={nombre}
                 onClick={() => onNavigate(nombre)}
-                className={`group relative flex h-40 flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.06] p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-white/10 ${clases.border}`}
+                className={`group relative flex h-40 flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.06)] p-4 text-center shadow-xl transition-[transform,background-color,border-color] duration-200 ease-out will-change-transform hover:scale-105 hover:bg-[rgba(255,255,255,0.1)] ${clases.border}`}
               >
                 {/* Franja de acento arriba — mismo lenguaje visual que las
                     UserCard del login, para que la app se sienta como un
                     solo diseño coherente en vez de pantallas sueltas. */}
-                <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${clases.gradiente}`} />
+                <div className={`absolute inset-x-0 top-0 h-1 ${clases.gradiente}`} />
 
                 <div
-                  className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-white transition-transform duration-200 ease-out group-hover:scale-110 ${clases.gradiente} ${clases.glow}`}
+                  className={`flex h-14 w-14 items-center justify-center rounded-2xl text-white transition-transform duration-200 ease-out group-hover:scale-110 ${clases.gradiente} ${clases.glow}`}
                 >
                   <Icon size={24} />
                 </div>
