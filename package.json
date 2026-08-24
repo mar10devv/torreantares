@@ -39,15 +39,19 @@
     "appId": "com.torreantares.app",
     "productName": "Torre Antares",
     "files": [
-      "main.cjs"
+      "main.cjs",
+      "build/icon.ico"
     ],
     "win": {
-      "target": "nsis",
+      "target": ["portable", "nsis"],
       "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false
+    },
+    "portable": {
+      "artifactName": "TorreAntares-Portable.exe"
     }
   }
 }
