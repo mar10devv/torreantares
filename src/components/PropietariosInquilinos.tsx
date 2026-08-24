@@ -6,7 +6,6 @@ import {
   Phone,
   Mail,
   Home,
-  UserRound,
   MoreVertical,
   Pencil,
   Trash2,
@@ -16,6 +15,7 @@ import {
   X,
   Check,
 } from "lucide-react";
+import ContactoDetalleModal, { type ContactoDetalle } from "./ContactoDetalleModal";
 import {
   crearResidenteEnDB,
   obtenerResidentesDeDB,
@@ -96,16 +96,19 @@ export async function buscarResidenteActivo(
 }
 
 /* ---------------------------------------------------------- */
-/* Tarjeta de residente con menú de 3 puntitos                  */
+/* Tarjeta de residente: clickeable (abre el detalle, mismo      */
+/* patrón que ContactoCard en Contactos.tsx) + menú de 3 puntitos */
 /* ---------------------------------------------------------- */
 
 function ResidenteCard({
   residente,
+  onClick,
   onEditar,
   onEliminar,
   onReemplazar,
 }: {
   residente: Residente;
+  onClick: () => void;
   onEditar: () => void;
   onEliminar: () => void;
   onReemplazar: (nuevoTipo: TipoResidente) => void;
@@ -126,8 +129,11 @@ function ResidenteCard({
   const esPropietario = residente.tipo === "propietario";
 
   return (
-    <div className="relative rounded-2xl border border-white/10 bg-white/[0.03] p-4 pr-12">
-      <div className="flex items-start gap-4">
+    <div className="relative">
+      <button
+        onClick={onClick}
+        className="flex w-full items-start gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 pr-12 text-left transition hover:bg-white/[0.06] active:scale-[0.99]"
+      >
         <div
           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${
             esPropietario ? "bg-[rgba(16,185,129,0.2)] text-emerald-300" : "bg-[rgba(59,130,246,0.2)] text-blue-300"
@@ -164,7 +170,7 @@ function ResidenteCard({
           </div>
           <p className="mt-1 text-[11px] text-gray-500">Desde {formatearFecha(residente.fechaInicio)}</p>
         </div>
-      </div>
+      </button>
 
       <button
         onClick={(e) => {
@@ -440,6 +446,9 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
   const [busqueda, setBusqueda] = useState("");
   const [modalEstado, setModalEstado] = useState<EstadoModal>(null);
   const [enviando, setEnviando] = useState(false);
+  // Residente seleccionado para ver en el modal de detalle (mismo patrón que
+  // "seleccionado" en Contactos.tsx, reusando el mismo ContactoDetalleModal).
+  const [seleccionado, setSeleccionado] = useState<ContactoDetalle | null>(null);
 
   const [residentes, setResidentes] = useState<Residente[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -597,6 +606,14 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
             <ResidenteCard
               key={residente.id}
               residente={residente}
+              onClick={() =>
+                setSeleccionado({
+                  nombre: `${residente.nombre} ${residente.apellido}`,
+                  subtitulo: `Depto ${residente.apartamento} · ${TIPO_LABEL[residente.tipo]}`,
+                  telefono: residente.telefono,
+                  email: residente.email,
+                })
+              }
               onEditar={() => setModalEstado({ modo: "editar", residente })}
               onEliminar={() => handleEliminar(residente)}
               onReemplazar={(nuevoTipo) => handleReemplazar(residente, nuevoTipo)}
@@ -634,6 +651,8 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
           onGuardar={handleGuardarNuevo}
         />
       )}
+
+      <ContactoDetalleModal contacto={seleccionado} onClose={() => setSeleccionado(null)} />
     </main>
   );
 }
