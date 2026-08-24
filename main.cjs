@@ -1,7 +1,9 @@
 const { app, BrowserWindow, Menu, globalShortcut } = require("electron");
+const path = require("path");
 
 // 🔗 Reemplazá esto por la URL real de tu deploy en Netlify.
 const URL_APP = "https://torreantares.netlify.app";
+
 
 function crearVentana() {
   const ventana = new BrowserWindow({
@@ -14,6 +16,7 @@ function crearVentana() {
                  // Poné false si querés que ni siquiera se vea la barra de título/minimizar/cerrar,
                  // aunque ahí tenés que armar tus propios botones de cerrar/minimizar en la web.
     backgroundColor: "#0d1117", // evita el flash blanco mientras carga
+    icon: path.join(__dirname, "build", "icon.ico"),
     webPreferences: {
       devTools: false, // 🔒 desactiva F12 / clic derecho > Inspeccionar de raíz
       contextIsolation: true,
