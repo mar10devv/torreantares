@@ -43,11 +43,8 @@
       "build/icon.ico"
     ],
     "win": {
-      "target": ["portable"],
+      "target": ["zip"],
       "icon": "build/icon.ico"
-    },
-    "portable": {
-      "artifactName": "TorreAntares-Portable.exe"
     }
   }
 }
