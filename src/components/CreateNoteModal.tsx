@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { X } from "lucide-react";
+import { useRef, useState } from "react";
+import { X, Send, Loader2 } from "lucide-react";
 
 interface CreateNoteModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onNoteCreated: (contenido: string) => void;
+  onNoteCreated: (contenido: string) => void | Promise<void>;
 }
+
+const ALTURA_MAX_TEXTAREA = 200; // px, a partir de acá el textarea scrollea en vez de seguir creciendo
 
 export default function CreateNoteModal({
   isOpen,
@@ -14,29 +16,66 @@ export default function CreateNoteModal({
 }: CreateNoteModalProps) {
   const [contenido, setContenido] = useState("");
   const [error, setError] = useState("");
+  const [publicando, setPublicando] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   if (!isOpen) return null;
 
   const resetForm = () => {
     setContenido("");
     setError("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
+  // Mientras se está publicando, no dejamos cerrar el modal (ni por la X
+  // ni haciendo click afuera), para que el usuario no pierda de vista que
+  // la nota se está guardando.
   const handleClose = () => {
+    if (publicando) return;
     resetForm();
     onClose();
   };
 
-  const handleGuardar = () => {
+  // El textarea crece con el contenido, como el compositor de un chat,
+  // hasta un tope, a partir del cual empieza a scrollear internamente.
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setContenido(e.target.value);
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, ALTURA_MAX_TEXTAREA)}px`;
+  };
+
+  const handleGuardar = async () => {
     if (!contenido.trim()) {
       setError("La nota no puede estar vacía.");
       return;
     }
 
-    onNoteCreated(contenido.trim());
-    resetForm();
-    onClose();
+    setError("");
+    setPublicando(true);
+    try {
+      // Esperamos a que la nota quede realmente publicada (creada en la
+      // base de datos y reflejada en la lista) antes de cerrar el modal.
+      await onNoteCreated(contenido.trim());
+      resetForm();
+      onClose();
+    } catch (err) {
+      console.error("Error al publicar la nota:", err);
+      setError("No se pudo publicar la nota. Intentá de nuevo.");
+    } finally {
+      setPublicando(false);
+    }
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter publica, Shift+Enter agrega un salto de línea (como en Telegram).
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleGuardar();
+    }
+  };
+
+  const puedeEnviar = contenido.trim() !== "" && !publicando;
 
   return (
     <div
@@ -45,55 +84,59 @@ export default function CreateNoteModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#171b22]/90 p-8 shadow-2xl backdrop-blur-2xl"
+        className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#171b22]/95 shadow-2xl backdrop-blur-2xl"
       >
-        <div className="mb-8 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-white">
-            Nueva nota
-          </h2>
-
-          <button
-            onClick={handleClose}
-            className="rounded-full p-2 transition hover:bg-white/10"
-          >
-            <X className="text-white" size={22} />
-          </button>
-        </div>
-
-        <div className="space-y-5">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
           <div>
-            <label className="mb-2 block text-sm text-gray-300">
-              Contenido <span className="text-red-500">*</span>
-            </label>
-
-            <textarea
-              rows={5}
-              value={contenido}
-              onChange={(e) => setContenido(e.target.value)}
-              placeholder="Ej: Apartamento 500 rompió un vaso"
-              className="w-full resize-none rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
-            />
+            <h2 className="text-lg font-bold text-white">Nueva nota</h2>
+            <p className="text-xs text-gray-500">Se publica en el muro para todos</p>
           </div>
 
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
-        </div>
-
-        <div className="mt-8 flex justify-end gap-4">
           <button
             onClick={handleClose}
-            className="rounded-xl border border-white/10 px-5 py-3 text-white transition hover:bg-white/10"
+            disabled={publicando}
+            className="rounded-full p-2 transition hover:bg-white/10 disabled:pointer-events-none disabled:opacity-30"
           >
-            Cancelar
+            <X className="text-white" size={20} />
           </button>
+        </div>
 
-          <button
-            onClick={handleGuardar}
-            className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
+        {/* Cuerpo: barra de composición estilo chat */}
+        <div className="px-6 py-6">
+          <div
+            className={`flex items-end gap-2 rounded-3xl border bg-white/5 px-4 py-2.5 transition ${
+              error ? "border-red-500/50" : "border-white/10 focus-within:border-blue-500/60"
+            }`}
           >
-            Publicar nota
-          </button>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={contenido}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              placeholder="Escribí una nota, ej: Apartamento 500 rompió un vaso..."
+              disabled={publicando}
+              className="max-h-[200px] flex-1 resize-none bg-transparent py-1.5 text-[15px] text-white outline-none placeholder:text-gray-500 disabled:opacity-50"
+            />
+
+            <button
+              onClick={handleGuardar}
+              disabled={!puedeEnviar}
+              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition enabled:hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-gray-500"
+            >
+              {publicando ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Send size={16} className="translate-x-[-1px]" />
+              )}
+            </button>
+          </div>
+
+          <div className="mt-2 flex items-center justify-between px-1">
+            <p className="text-xs text-red-500">{error}</p>
+            <p className="text-[11px] text-gray-600">Enter para publicar · Shift+Enter para salto de línea</p>
+          </div>
         </div>
       </div>
     </div>

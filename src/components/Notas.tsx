@@ -163,6 +163,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     } catch (err) {
       console.error("Error al crear nota en Firestore:", err);
       setErrorNotas("No se pudo crear la nota. Intentá de nuevo.");
+      throw err;
     }
   };
 
@@ -183,8 +184,24 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     });
   };
 
+  // "Intérprete" de fechas: si la nota es de hoy, ayer o antes de ayer,
+  // muestra un texto relativo + la hora ("Hoy 14:30", "Ayer 14:30",
+  // "Antes de ayer 14:30"). Para cualquier fecha más vieja, muestra la
+  // fecha completa como antes. La comparación de días ignora la hora,
+  // así que se compara solo año/mes/día en la zona horaria local.
   const formatearFecha = (iso: string) => {
     const fecha = new Date(iso);
+    const hoy = new Date();
+
+    const soloFecha = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const diffDias = Math.round((soloFecha(hoy) - soloFecha(fecha)) / 86_400_000);
+
+    const hora = fecha.toLocaleString("es-UY", { hour: "2-digit", minute: "2-digit" });
+
+    if (diffDias === 0) return `Hoy ${hora}`;
+    if (diffDias === 1) return `Ayer ${hora}`;
+    if (diffDias === 2) return `Antes de ayer ${hora}`;
+
     return fecha.toLocaleString("es-UY", {
       day: "2-digit",
       month: "2-digit",

@@ -41,7 +41,7 @@ function colorParaNombre(nombre: string) {
 
 function Avatar({ nombre, tamano = "sm" }: { nombre: string; tamano?: "sm" | "xs" }) {
   const inicial = nombre.trim().charAt(0).toUpperCase();
-  const dimensiones = tamano === "sm" ? "h-8 w-8 text-sm" : "h-6 w-6 text-xs";
+  const dimensiones = tamano === "sm" ? "h-9 w-9 text-sm" : "h-6 w-6 text-[11px]";
 
   return (
     <div
@@ -63,18 +63,18 @@ const PREFIJOS_DESTACADOS: { regex: RegExp; color: "red" | "emerald" }[] = [
 ];
 
 const COLOR_CLASSES: Record<"red" | "emerald", string> = {
-  red: "bg-red-500/20 text-red-300",
-  emerald: "bg-emerald-500/20 text-emerald-300",
+  red: "bg-red-500/25 text-red-200",
+  emerald: "bg-emerald-500/25 text-emerald-200",
 };
 
-function ContenidoNota({ contenido }: { contenido: string }) {
+function ContenidoTexto({ contenido }: { contenido: string }) {
   for (const { regex, color } of PREFIJOS_DESTACADOS) {
     const match = contenido.match(regex);
     if (!match) continue;
 
     const [, prefijo, resto] = match;
     return (
-      <p className="text-[17px] font-semibold leading-snug text-white">
+      <p className="text-[15px] font-medium leading-snug">
         <span className={`mr-1.5 inline-block rounded-md px-2 py-0.5 font-semibold ${COLOR_CLASSES[color]}`}>
           {prefijo}
         </span>
@@ -83,7 +83,7 @@ function ContenidoNota({ contenido }: { contenido: string }) {
     );
   }
 
-  return <p className="text-[17px] font-semibold leading-snug text-white">{contenido}</p>;
+  return <p className="text-[15px] leading-snug">{contenido}</p>;
 }
 
 export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }: NoteCardProps) {
@@ -104,80 +104,82 @@ export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }
   };
 
   return (
-    <div
-      className={`rounded-2xl border p-5 shadow-xl backdrop-blur-2xl transition-colors ${
-        esNueva ? "border-blue-500/40 bg-blue-500/[0.06]" : "border-white/10 bg-white/[0.06]"
-      }`}
-    >
+    <div className="flex items-start gap-2.5">
+      <Avatar nombre={nota.autor} tamano="sm" />
 
-      {/* Nota principal */}
-      <div className="flex gap-3">
-        <Avatar nombre={nota.autor} tamano="sm" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <ContenidoNota contenido={nota.contenido} />
-            </div>
-            {esNueva && (
-              <span className="mt-0.5 shrink-0 whitespace-nowrap rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
-                Nuevo
-              </span>
-            )}
+      {/* Una sola burbuja: nota + comentarios + input, todo adentro */}
+      <div
+        className={`relative max-w-[80%] flex-1 rounded-2xl rounded-tl-sm bg-[#202c33] px-3.5 py-2 text-gray-100 shadow-md ${
+          esNueva ? "ring-2 ring-blue-400/60" : ""
+        }`}
+      >
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className={`mb-0.5 text-xs font-semibold ${colorParaNombre(nota.autor).replace("bg-", "text-")}`}>
+              {nota.autor}
+            </p>
+            <ContenidoTexto contenido={nota.contenido} />
           </div>
-          <p className="mt-2 text-xs text-gray-400">
-            <span className="font-medium text-gray-300">{nota.autor}</span> · {formatearFecha(nota.fecha)}
-          </p>
+          {esNueva && (
+            <span className="mt-0.5 shrink-0 whitespace-nowrap rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
+              Nuevo
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-right text-[11px] text-gray-400">{formatearFecha(nota.fecha)}</p>
+
+        {/* Comentarios, como filas dentro de la misma burbuja */}
+        {nota.comentarios.length > 0 && (
+          <div className="mt-2 flex flex-col gap-2 border-t border-white/10 pt-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              {nota.comentarios.length === 1 ? "1 comentario añadido" : `${nota.comentarios.length} comentarios añadidos`}
+            </p>
+            {nota.comentarios.map((c, index) => (
+              <div key={index} className="flex items-start gap-2">
+                <Avatar nombre={c.autor} tamano="xs" />
+                <div className="min-w-0 flex-1">
+                  <p className={`text-xs font-semibold ${colorParaNombre(c.autor).replace("bg-", "text-")}`}>
+                    {c.autor}
+                  </p>
+                  <p className="text-sm leading-snug text-gray-100">{c.contenido}</p>
+                  <p className="mt-0.5 text-right text-[10px] text-gray-500">{formatearFecha(c.fecha)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Añadir comentario / input, siempre dentro de la misma burbuja */}
+        <div className="mt-2 border-t border-white/10 pt-2">
+          {mostrarInput ? (
+            <div className="flex gap-2">
+              <input
+                autoFocus
+                type="text"
+                value={comentario}
+                onChange={(e) => setComentario(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Escribir un comentario..."
+                className="flex-1 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+              />
+              <button
+                onClick={handleEnviar}
+                className="flex shrink-0 items-center justify-center rounded-full bg-blue-600 p-2 text-white transition hover:bg-blue-500"
+              >
+                <Send size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setMostrarInput(true)}
+              className="flex items-center gap-1.5 text-xs text-gray-400 transition hover:text-white"
+            >
+              <MessageSquarePlus size={14} />
+              Añadir un comentario sobre esta nota
+            </button>
+          )}
         </div>
       </div>
-
-      {/* Comentarios: anidados, con hilo conector e indentados a la altura del avatar */}
-      {nota.comentarios.length > 0 && (
-        <div className="relative mt-4 ml-4 flex flex-col gap-3 border-l-2 border-white/10 pl-6">
-          {nota.comentarios.map((c, index) => (
-            <div key={index} className="flex gap-2.5 rounded-xl bg-black/25 p-3">
-              <Avatar nombre={c.autor} tamano="xs" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm leading-snug text-gray-100">{c.contenido}</p>
-                <p className="mt-1 text-[11px] text-gray-500">
-                  <span className="font-medium text-gray-400">{c.autor}</span> · {formatearFecha(c.fecha)}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Botón para mostrar el input de comentario */}
-      {!mostrarInput && (
-        <button
-          onClick={() => setMostrarInput(true)}
-          className="mt-4 flex items-center gap-2 border-t border-white/10 pt-3 text-sm text-gray-400 transition hover:text-white"
-        >
-          <MessageSquarePlus size={16} />
-          Añadir un comentario sobre esta nota
-        </button>
-      )}
-
-      {/* Input para nuevo comentario */}
-      {mostrarInput && (
-        <div className="mt-4 flex gap-2 border-t border-white/10 pt-3">
-          <input
-            autoFocus
-            type="text"
-            value={comentario}
-            onChange={(e) => setComentario(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Escribir un comentario..."
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
-          />
-          <button
-            onClick={handleEnviar}
-            className="rounded-lg bg-blue-600 px-3 py-2 text-white transition hover:bg-blue-500"
-          >
-            <Send size={16} />
-          </button>
-        </div>
-      )}
     </div>
   );
 }
