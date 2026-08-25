@@ -43,12 +43,8 @@
       "build/icon.ico"
     ],
     "win": {
-      "target": ["portable", "nsis"],
+      "target": ["portable"],
       "icon": "build/icon.ico"
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false
     },
     "portable": {
       "artifactName": "TorreAntares-Portable.exe"
