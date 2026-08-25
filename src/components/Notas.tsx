@@ -213,6 +213,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     setTerminoActivo("");
     setResultadosBusqueda([]);
     setBuscando(false);
+    setErrorNotas("");
   };
 
   const handleBusquedaKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
