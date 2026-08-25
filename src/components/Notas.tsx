@@ -3,7 +3,13 @@ import { ArrowLeft, Plus, ChevronLeft, ChevronRight, Search } from "lucide-react
 import CreateNoteModal from "./CreateNoteModal";
 import NoteCard from "./NoteCard";
 import Loader from "./Loader";
-import { crearNotaEnDB, obtenerNotasDeDB, agregarComentarioEnDB } from "../lib/firebase";
+import {
+  crearNotaEnDB,
+  obtenerNotasPorMesDeDB,
+  buscarNotasPorPalabrasClaveDeDB,
+  palabrasParaBuscar,
+  agregarComentarioEnDB,
+} from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -40,11 +46,6 @@ const MESES = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ];
 
-// tiempo simulado (ms) que tarda la "consulta a la base de datos" del buscador.
-// Cuando haya una búsqueda real contra un backend, esto desaparece: el loader
-// se mostraría mientras dura el fetch real, no un timeout fijo como ahora.
-const DEMORA_BUSQUEDA_MS = 700;
-
 function cargarLeidasPorUsuario(): Record<string, string[]> {
   if (typeof window === "undefined") return {};
   try {
@@ -53,6 +54,19 @@ function cargarLeidasPorUsuario(): Record<string, string[]> {
   } catch {
     return {};
   }
+}
+
+// Rango [inicioISO, finISO) de un mes calendario, en el mismo formato ISO
+// que se usa para guardar "fecha" en cada nota (new Date().toISOString()),
+// así la comparación en la consulta a Firestore es consistente.
+function rangoDelMes(anio: number, mes: number) {
+  const inicio = new Date(anio, mes, 1);
+  const fin = new Date(anio, mes + 1, 1);
+  return { inicioISO: inicio.toISOString(), finISO: fin.toISOString() };
+}
+
+function claveMes(anio: number, mes: number) {
+  return `${anio}-${mes}`;
 }
 
 export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
@@ -66,89 +80,138 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
   const [busqueda, setBusqueda] = useState("");
   const [terminoActivo, setTerminoActivo] = useState("");
   const [buscando, setBuscando] = useState(false);
-  const busquedaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Las notas ahora viven en Firestore, no en localStorage.
-  const [notas, setNotas] = useState<Nota[]>([]);
+  // Notas del mes actualmente seleccionado (lo único que se pide a
+  // Firestore al navegar por meses) y resultados del buscador (que
+  // consultan por palabra clave, sin importar el mes). Solo una de las
+  // dos se muestra a la vez, según haya o no una búsqueda activa.
+  const [notasDelMes, setNotasDelMes] = useState<Nota[]>([]);
+  const [resultadosBusqueda, setResultadosBusqueda] = useState<Nota[]>([]);
   const [cargandoNotas, setCargandoNotas] = useState(true);
   const [errorNotas, setErrorNotas] = useState("");
 
   // Notas que este usuario todavía no había visto la última vez que entró.
   // Es un snapshot fijo: se calcula una sola vez, apenas terminan de cargar
-  // las notas por primera vez, y no vuelve a recalcularse en esta visita.
+  // las notas del mes actual por primera vez, y no vuelve a recalcularse en
+  // esta visita. Al cargar por mes en vez de traer todo, este cálculo
+  // queda acotado a las notas del mes que se esté viendo — en la práctica
+  // casi siempre alcanza, porque lo nuevo suele ser del mes en curso.
   const [notasNuevasIds, setNotasNuevasIds] = useState<Set<string>>(new Set());
-  const yaCalculoNuevasRef = useRef(false);
+  const esPrimeraCargaRef = useRef(true);
 
-  // Trae la lista de notas desde Firestore. Se usa tanto al montar el
-  // componente como después de crear una nota o agregar un comentario.
-  const cargarNotas = async () => {
+  // Caché en memoria de meses ya consultados en esta sesión: volver a un
+  // mes ya visitado no vuelve a pedirle nada a Firestore.
+  const cacheMesesRef = useRef<Map<string, Nota[]>>(new Map());
+
+  // Trae las notas de un mes puntual, usando la caché si ya se consultó
+  // antes en esta sesión. `forzar` ignora la caché (se usa después de
+  // crear una nota o un comentario, para reflejar el cambio).
+  const cargarMes = async (anio: number, mes: number, forzar = false): Promise<Nota[]> => {
+    const key = claveMes(anio, mes);
+
+    if (!forzar && cacheMesesRef.current.has(key)) {
+      const datosEnCache = cacheMesesRef.current.get(key)!;
+      setNotasDelMes(datosEnCache);
+      return datosEnCache;
+    }
+
     try {
       setErrorNotas("");
-      const datos = await obtenerNotasDeDB();
-      setNotas(datos as unknown as Nota[]);
-      return datos as unknown as Nota[];
+      const { inicioISO, finISO } = rangoDelMes(anio, mes);
+      const datos = (await obtenerNotasPorMesDeDB(inicioISO, finISO)) as unknown as Nota[];
+      cacheMesesRef.current.set(key, datos);
+      setNotasDelMes(datos);
+      return datos;
     } catch (err) {
-      console.error("Error al cargar notas desde Firestore:", err);
+      console.error("Error al cargar notas del mes desde Firestore:", err);
       setErrorNotas("No se pudieron cargar las notas. Revisá tu conexión.");
       return [];
-    } finally {
-      setCargandoNotas(false);
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      const datos = await cargarNotas();
+  // Ejecuta la búsqueda por palabra clave contra Firestore (no filtra en
+  // el navegador: la consulta ya viene filtrada del servidor).
+  const ejecutarBusqueda = async (termino: string) => {
+    const palabras = palabrasParaBuscar(termino);
 
-      // Calcula qué notas son "nuevas" para este usuario, usando el registro
-      // de lectura tal como estaba ANTES de esta visita.
-      const leidasPorUsuario = cargarLeidasPorUsuario();
-      const leidasDeEsteUsuario = new Set(leidasPorUsuario[usuario.nombre] ?? []);
-      const nuevas = new Set(
-        datos
-          .filter((n) => n.autor !== usuario.nombre && !leidasDeEsteUsuario.has(n.id))
-          .map((n) => n.id)
-      );
-      setNotasNuevasIds(nuevas);
-      yaCalculoNuevasRef.current = true;
-
-      // Marca todas las notas actuales como leídas para la próxima visita.
-      leidasPorUsuario[usuario.nombre] = datos.map((n) => n.id);
-      localStorage.setItem(LEIDAS_KEY, JSON.stringify(leidasPorUsuario));
-
-      onListo?.();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Buscador: se dispara manualmente (botón "Buscar" o tecla Enter), no
-  // en cada letra tipeada. Simula una consulta a la base de datos con un
-  // pequeño delay, mostrando el loader mientras "busca". Cuando el buscador
-  // se conecte a un backend real, este bloque pasa a ser un fetch/await con
-  // el término como filtro, y el loader se muestra mientras dura ese fetch
-  // en vez del timeout.
-  const handleBuscar = () => {
-    if (busquedaTimeoutRef.current) clearTimeout(busquedaTimeoutRef.current);
-
-    const termino = busqueda.trim();
-
-    if (termino === "") {
-      setTerminoActivo("");
-      setBuscando(false);
+    if (palabras.length === 0) {
+      setResultadosBusqueda([]);
       return;
     }
 
     setBuscando(true);
-    busquedaTimeoutRef.current = setTimeout(() => {
-      setTerminoActivo(termino);
+    try {
+      setErrorNotas("");
+      const datos = (await buscarNotasPorPalabrasClaveDeDB(palabras)) as unknown as Nota[];
+      setResultadosBusqueda(datos);
+    } catch (err) {
+      console.error("Error al buscar notas en Firestore:", err);
+      setErrorNotas("No se pudo completar la búsqueda. Intentá de nuevo.");
+    } finally {
       setBuscando(false);
-    }, DEMORA_BUSQUEDA_MS);
+    }
+  };
+
+  // Vuelve a pedir lo que esté visible en este momento (mes actual o
+  // resultados de búsqueda), invalidando la caché de meses. Se usa después
+  // de publicar una nota o agregar un comentario, para que el cambio se
+  // vea reflejado sin tener que recargar toda la pantalla.
+  const recargarVistaActual = async () => {
+    cacheMesesRef.current.clear();
+    if (terminoActivo.trim() !== "") {
+      await ejecutarBusqueda(terminoActivo);
+    } else {
+      await cargarMes(mesSeleccionado.anio, mesSeleccionado.mes, true);
+    }
+  };
+
+  // Carga el mes seleccionado cada vez que cambia (incluye la carga
+  // inicial al montar). Solo la primera vez calcula "notas nuevas" y
+  // marca como leídas las notas de ese mes.
+  useEffect(() => {
+    (async () => {
+      setCargandoNotas(true);
+      const datos = await cargarMes(mesSeleccionado.anio, mesSeleccionado.mes);
+
+      if (esPrimeraCargaRef.current) {
+        esPrimeraCargaRef.current = false;
+
+        const leidasPorUsuario = cargarLeidasPorUsuario();
+        const leidasDeEsteUsuario = new Set(leidasPorUsuario[usuario.nombre] ?? []);
+        const nuevas = new Set(
+          datos
+            .filter((n) => n.autor !== usuario.nombre && !leidasDeEsteUsuario.has(n.id))
+            .map((n) => n.id)
+        );
+        setNotasNuevasIds(nuevas);
+
+        leidasPorUsuario[usuario.nombre] = datos.map((n) => n.id);
+        localStorage.setItem(LEIDAS_KEY, JSON.stringify(leidasPorUsuario));
+
+        onListo?.();
+      }
+
+      setCargandoNotas(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mesSeleccionado.anio, mesSeleccionado.mes]);
+
+  const handleBuscar = () => {
+    const termino = busqueda.trim();
+    setTerminoActivo(termino);
+
+    if (termino === "") {
+      setResultadosBusqueda([]);
+      return;
+    }
+
+    ejecutarBusqueda(termino);
   };
 
   const handleLimpiarBusqueda = () => {
-    if (busquedaTimeoutRef.current) clearTimeout(busquedaTimeoutRef.current);
     setBusqueda("");
     setTerminoActivo("");
+    setResultadosBusqueda([]);
     setBuscando(false);
   };
 
@@ -159,7 +222,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
   const handleNoteCreated = async (contenido: string) => {
     try {
       await crearNotaEnDB({ contenido, autor: usuario.nombre });
-      await cargarNotas();
+      await recargarVistaActual();
     } catch (err) {
       console.error("Error al crear nota en Firestore:", err);
       setErrorNotas("No se pudo crear la nota. Intentá de nuevo.");
@@ -170,7 +233,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
   const handleAddComment = async (notaId: string, contenido: string) => {
     try {
       await agregarComentarioEnDB(notaId, { contenido, autor: usuario.nombre });
-      await cargarNotas();
+      await recargarVistaActual();
     } catch (err) {
       console.error("Error al agregar comentario en Firestore:", err);
       setErrorNotas("No se pudo agregar el comentario. Intentá de nuevo.");
@@ -213,25 +276,11 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
 
   const hayBusqueda = terminoActivo.trim() !== "";
 
-  // Con búsqueda activa: se busca en TODAS las notas (sin importar el mes),
-  // por contenido o autor. Sin búsqueda: se respeta el mes seleccionado.
-  const notasFiltradas = hayBusqueda
-    ? notas.filter((nota) => {
-        const termino = terminoActivo.toLowerCase();
-        return (
-          nota.contenido.toLowerCase().includes(termino) ||
-          nota.autor.toLowerCase().includes(termino)
-        );
-      })
-    : notas.filter((nota) => {
-        const fecha = new Date(nota.fecha);
-        return fecha.getFullYear() === mesSeleccionado.anio && fecha.getMonth() === mesSeleccionado.mes;
-      });
-
-  // Más recientes primero
-  const notasOrdenadas = [...notasFiltradas].sort(
-    (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
-  );
+  // Con búsqueda activa se muestran los resultados de Firestore (ya vienen
+  // ordenados por fecha desc); sin búsqueda, las notas del mes seleccionado
+  // (también ya ordenadas por la consulta) — no hace falta volver a
+  // filtrar ni ordenar del lado del cliente en ninguno de los dos casos.
+  const notasVisibles = hayBusqueda ? resultadosBusqueda : notasDelMes;
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-[#0d1117] px-6 py-16 text-white">
@@ -317,7 +366,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
           <p className="text-center text-red-400">{errorNotas}</p>
         ) : (
           <>
-            {notasOrdenadas.length === 0 && (
+            {notasVisibles.length === 0 && (
               <p className="text-center text-gray-400">
                 {hayBusqueda
                   ? `No se encontraron notas para "${terminoActivo}".`
@@ -325,7 +374,7 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
               </p>
             )}
 
-            {notasOrdenadas.map((nota) => (
+            {notasVisibles.map((nota) => (
               <NoteCard
                 key={nota.id}
                 nota={nota}
