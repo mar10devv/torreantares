@@ -242,9 +242,14 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
         <>
           {/* Calendario */}
           <div className="w-full max-w-3xl">
-            <div className="mb-2 grid grid-cols-7 gap-1.5 text-center text-xs font-medium text-gray-500 sm:gap-2">
+            <div className="mb-3 grid grid-cols-7 gap-1.5 text-center sm:gap-2">
               {DIAS_SEMANA.map((d) => (
-                <div key={d}>{d}</div>
+                <div
+                  key={d}
+                  className="rounded-lg bg-white/5 py-1.5 text-xs font-bold uppercase tracking-wider text-gray-200 sm:text-sm"
+                >
+                  {d}
+                </div>
               ))}
             </div>
 

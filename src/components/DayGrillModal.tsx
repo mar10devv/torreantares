@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Check, Ban, CircleDollarSign, Sun, Moon, Clock } from "lucide-react";
+import { X, Check, Ban, CircleDollarSign, Sun, Moon, Clock, TriangleAlert } from "lucide-react";
 
 export type Turno = "mediodia" | "noche";
 export type Ubicacion = "interior" | "exterior";
@@ -203,6 +203,36 @@ function SlotButton({
   );
 }
 
+// Reemplaza al window.alert() del navegador (ese cartel gris feo con el
+// nombre del sitio) por un modal propio, con el mismo lenguaje visual que
+// el resto de la app.
+function AvisoModal({ mensaje, onCerrar }: { mensaje: string; onCerrar: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-md"
+      onClick={onCerrar}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-3xl border border-amber-500/25 bg-[#171b22]/95 p-6 text-center shadow-2xl backdrop-blur-2xl"
+      >
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+          <TriangleAlert size={22} />
+        </div>
+
+        <p className="mt-4 text-sm leading-relaxed text-gray-200">{mensaje}</p>
+
+        <button
+          onClick={onCerrar}
+          className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SlotDetailPanel({
   parrillero,
   turno,
@@ -237,6 +267,7 @@ function SlotDetailPanel({
   const [pagado, setPagado] = useState(true);
   const [modo, setModo] = useState<"detalle" | "cancelar">("detalle");
   const [motivo, setMotivo] = useState("");
+  const [mostrarAvisoMotivo, setMostrarAvisoMotivo] = useState(false);
 
   const handleConfirmar = () => {
     if (!unidad.trim() || !nombreCliente.trim()) return;
@@ -251,7 +282,7 @@ function SlotDetailPanel({
   const handleConfirmarCancelacion = () => {
     if (!reserva) return;
     if (!motivo.trim()) {
-      window.alert("Tenés que indicar un motivo para cancelar la reserva.");
+      setMostrarAvisoMotivo(true);
       return;
     }
     onCancelar(reserva.id, motivo.trim());
@@ -267,6 +298,7 @@ function SlotDetailPanel({
     : "border-emerald-500/25 bg-emerald-500/[0.04]";
 
   return (
+    <>
     <div className={`rounded-xl border p-4 ${estilos}`}>
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
         Parrillero {parrillero}
@@ -433,6 +465,14 @@ function SlotDetailPanel({
         </div>
       )}
     </div>
+
+    {mostrarAvisoMotivo && (
+      <AvisoModal
+        mensaje="Tenés que indicar un motivo para cancelar la reserva."
+        onCerrar={() => setMostrarAvisoMotivo(false)}
+      />
+    )}
+    </>
   );
 }
 
@@ -488,30 +528,43 @@ export default function DayGrillModal({
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
       >
-        <div className="mb-6 flex items-start justify-between">
+        {/* Encabezado: fecha + botón cerrar */}
+        <div className="mb-5 flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-bold capitalize text-white">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+              Reserva de parrillero
+            </p>
+            <h2 className="mt-1 text-2xl font-bold capitalize text-white">
               {formatearFechaTitulo(fecha)}
             </h2>
-            <p className="mt-1.5 flex items-center gap-2 text-sm">
-              <span className="font-medium capitalize text-gray-300">
-                {ubicacion === "interior" ? "Adentro" : "Afuera"}
-              </span>
-              <span className="text-gray-600">·</span>
-              <span className="font-semibold text-emerald-400">{formatearImporte(precio)}</span>
-            </p>
           </div>
 
           <button
             onClick={onClose}
-            className="rounded-full p-2 transition hover:bg-white/10"
+            className="shrink-0 rounded-full p-2 transition hover:bg-white/10"
           >
             <X className="text-white" size={20} />
           </button>
         </div>
 
+        {/* Precio destacado: mismo lenguaje visual que la card de "Dinero
+            para retirar" en CobrarParrilleros, para que el importe se lea
+            como el dato principal y no como una línea de texto más. */}
+        <div className="mb-6 flex items-center gap-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.07] px-5 py-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
+            <CircleDollarSign size={22} />
+          </div>
+          <div>
+            <p className="text-xs font-medium capitalize text-emerald-300/80">
+              Precio · {ubicacion === "interior" ? "Adentro" : "Afuera"}
+            </p>
+            <p className="text-3xl font-bold leading-tight text-white">{formatearImporte(precio)}</p>
+          </div>
+        </div>
+
         {/* Selector Adentro / Afuera */}
-        <div className="mb-3 flex rounded-xl border border-white/10 bg-white/5 p-1">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Ubicación</p>
+        <div className="mb-5 flex rounded-xl border border-white/10 bg-white/5 p-1">
           {UBICACIONES.map(({ key, label }) => (
             <button
               key={key}
@@ -526,6 +579,7 @@ export default function DayGrillModal({
         </div>
 
         {/* Selector Día / Noche */}
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Turno</p>
         <div className="mb-6 flex flex-col items-center gap-3">
           <div className="flex w-full rounded-xl border border-white/10 bg-white/5 p-1">
             {TURNOS.map(({ key, label, Icon }) => (
@@ -548,6 +602,9 @@ export default function DayGrillModal({
           </div>
         </div>
 
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Elegí un parrillero
+        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {([1, 2] as const).map((parrillero) => (
             <div key={parrillero} className="flex flex-col gap-2">
