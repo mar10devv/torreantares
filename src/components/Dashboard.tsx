@@ -19,7 +19,7 @@ import logo from "../assets/logo.png";
 import type { Ingreso } from "./Ingresos";
 import type { ReservaParrillero } from "./DayGrillModal";
 import { obtenerIngresosDeDB, obtenerReservasParrilleroDeDB } from "../lib/firebase";
-import Soporte from "./soporte";
+import Soporte from "./Soporte";
 
 interface Usuario {
   nombre: string;
