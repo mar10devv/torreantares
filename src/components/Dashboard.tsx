@@ -13,11 +13,13 @@ import {
   TriangleAlert,
   CircleDollarSign,
   X,
+  CircleHelp,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import type { Ingreso } from "./Ingresos";
 import type { ReservaParrillero } from "./DayGrillModal";
 import { obtenerIngresosDeDB, obtenerReservasParrilleroDeDB } from "../lib/firebase";
+import Soporte from "./soporte";
 
 interface Usuario {
   nombre: string;
@@ -34,7 +36,7 @@ interface DashboardProps {
   onListo?: () => void;
 }
 
-type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo";
+type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo" | "gray";
 
 // IMPORTANTE — por qué acá no usamos from-blue-500/to-blue-700 ni bg-blue-500/15:
 // Tailwind v4 compila esas clases con color-mix(in oklab, ...) por debajo,
@@ -104,6 +106,13 @@ const COLOR_CLASSES: Record<
     gradiente: "bg-[linear-gradient(135deg,#6366f1,#4338ca)]",
     glow: "shadow-[0_0_30px_-10px_rgba(99,102,241,0.5)]",
   },
+  gray: {
+    bg: "bg-[rgba(115,115,115,0.15)]",
+    text: "text-gray-400",
+    border: "hover:border-[rgba(115,115,115,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#737373,#404040)]",
+    glow: "shadow-[0_0_30px_-10px_rgba(115,115,115,0.5)]",
+  },
 };
 
 const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; color: Color }[] = [
@@ -115,6 +124,7 @@ const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; co
   { nombre: "UTE", icon: Zap, color: "yellow" },
   { nombre: "Contactos", subtitulo: "Reclamos / Empleados", icon: Users, color: "fuchsia" },
   { nombre: "Administración", icon: Settings, color: "slate" },
+  { nombre: "Soporte", subtitulo: "Soporte e información", icon: CircleHelp, color: "gray" },
 ];
 
 // Mismo criterio que en UserCard: cada usuario "hereda" un color según
@@ -310,6 +320,10 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
   const [descartadas, setDescartadas] = useState<string[]>([]);
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [moduloEnDesarrollo, setModuloEnDesarrollo] = useState<string | null>(null);
+  // Soporte no navega al router principal: se muestra encima del propio
+  // Dashboard controlado por este estado, así no depende de que la app
+  // padre conozca esa ruta.
+  const [mostrarSoporte, setMostrarSoporte] = useState(false);
   const notificacionesVisibles = notificaciones.filter((n) => !descartadas.includes(n.id));
 
   // Módulos que todavía no están listos para usarse: en vez de navegar,
@@ -318,6 +332,10 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
   const MODULOS_NO_DISPONIBLES = new Set(["Administración"]);
 
   const handleClickModulo = (nombre: string) => {
+    if (nombre === "Soporte") {
+      setMostrarSoporte(true);
+      return;
+    }
     if (MODULOS_NO_DISPONIBLES.has(nombre)) {
       setModuloEnDesarrollo(nombre);
       return;
@@ -336,6 +354,11 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
     onListo?.();
     cargarNotificaciones().then(setNotificaciones);
   }, []);
+
+  // Si Soporte está activo, se muestra en lugar del grid de módulos.
+  if (mostrarSoporte) {
+    return <Soporte onVolver={() => setMostrarSoporte(false)} />;
+  }
 
   return (
     <main className="relative flex min-h-screen flex-col items-center overflow-hidden bg-[#0d1117] px-6 py-30 text-white">
