@@ -7,7 +7,7 @@ import type { Cochera } from "./Cocheras";
 import { buscarResidenteActivo } from "./PropietariosInquilinos";
 import {
   buscarContadorUte,
-  calcularTorrePorRecibo,
+  calcularTorrePorApartamento,
   MENSAJE_SIN_CONTADOR,
   MENSAJE_TORRE_NO_DETERMINADA,
 } from "./Ute";
@@ -101,7 +101,9 @@ function AvisoUte({ apartamento }: { apartamento: string }) {
     );
   }
 
-  const torre = calcularTorrePorRecibo(registro.recibo);
+  // La torre depende del número de APARTAMENTO (posición física real),
+  // no del número de recibo — ver comentario en Ute.tsx.
+  const torre = calcularTorrePorApartamento(apartamento);
 
   if (!torre) {
     return (

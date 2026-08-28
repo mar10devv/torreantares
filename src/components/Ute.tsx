@@ -27,14 +27,18 @@ export const MENSAJE_SIN_CONTADOR =
   "Este apartamento todavía no tiene un contador de UTE asignado en la planilla. Confirmar con administración.";
 
 export const MENSAJE_TORRE_NO_DETERMINADA =
-  "El número de contador no permite determinar automáticamente la torre (caso especial de penthouse). Confirmar ubicación física con administración.";
+  "El número de apartamento no permite determinar automáticamente la torre (caso especial de penthouse). Confirmar ubicación física con administración.";
 
 /**
- * La torre donde está físicamente el contador NO depende del depto, sino de los
- * últimos 2 dígitos del número de RECIBO (los contadores de UTE están agrupados
- * por sótano/torre, sin relación con la torre "real" del apartamento).
+ * La torre donde está físicamente alojado el contador depende de los últimos
+ * 2 dígitos del número de APARTAMENTO (posición física real del depto), NO
+ * del número de recibo. El recibo es solo el ID administrativo que UTE le
+ * puso al contador y no tiene relación con su ubicación física: por eso hay
+ * casos como el depto 710, cuyo contador tiene el número 709 (eso no cambia),
+ * pero está alojado en la torre que le corresponde al depto 710 (unidad "10"),
+ * no en la que le correspondería al número "709".
  *
- * Ej: depto 914 → recibo 917 → unidad "17" → torre Antares 3.
+ * Ej: depto 710 → recibo 709 (número de contador) → torre Puerta 3 (por ser el "10" de depto 710).
  */
 const RANGOS_UNIDAD_TORRE: { unidades: string[]; torre: Torre }[] = [
   { unidades: ["01", "02", "03", "04"], torre: "Puerta 1" },
@@ -44,8 +48,8 @@ const RANGOS_UNIDAD_TORRE: { unidades: string[]; torre: Torre }[] = [
   { unidades: ["15", "16", "17", "18"], torre: "Antares 3" },
 ];
 
-export function calcularTorrePorRecibo(recibo: string): Torre | null {
-  const soloNumeros = recibo.replace(/\D/g, "");
+export function calcularTorrePorApartamento(apartamento: string): Torre | null {
+  const soloNumeros = apartamento.replace(/\D/g, "");
   if (soloNumeros.length < 2) return null;
   const unidad = soloNumeros.slice(-2);
   const grupo = RANGOS_UNIDAD_TORRE.find((g) => g.unidades.includes(unidad));
@@ -69,11 +73,11 @@ export function calcularTorrePorRecibo(recibo: string): Torre | null {
  * — 906 → 907 tiene un tachón con otra anotación al lado que no se pudo leer con
  *   certeza en la foto. Se cargó "907" como mejor lectura disponible. Además el
  *   recibo 907 se repite en 909 → 907 (posible duplicado a confirmar).
- * — 119 a 124 (penthouse) tienen recibos 153 a 158: no encajan en la regla normal de
- *   unidad (ej. "153" no tiene una unidad de 2 dígitos reconocible: "53" no existe
- *   en ninguna torre). calcularTorrePorRecibo() va a devolver null para estos casos;
- *   la UI muestra un aviso pidiendo confirmar la torre a mano. Falta que nos digan
- *   en qué torre están estos 6 contadores.
+ * — 119 a 124 (penthouse): el número de apartamento no tiene una unidad de 2 dígitos
+ *   reconocible en ninguna torre ("19" a "24" no existen en RANGOS_UNIDAD_TORRE).
+ *   calcularTorrePorApartamento() va a devolver null para estos casos; la UI muestra
+ *   un aviso pidiendo confirmar la torre a mano. Falta que nos digan en qué torre
+ *   están estos 6 contadores.
  * — 1010 → 1009 tiene anotado al lado, a mano, "1011-1012" (motivo no confirmado).
  * — No existe información para los deptos 101 a 118 (no aparecen en ninguna de las
  *   dos hojas fotografiadas). Si existen, falta cargar esa parte de la planilla.
@@ -277,7 +281,8 @@ export default function Ute({ onVolver, onListo }: UteProps) {
 
   const buscoAlgo = busqueda.trim().length > 0;
   const registro = buscoAlgo ? buscarContadorUte(busqueda) : undefined;
-  const torre = registro?.recibo ? calcularTorrePorRecibo(registro.recibo) : null;
+  // La torre sale del número de APARTAMENTO (posición física real), no del recibo.
+  const torre = registro ? calcularTorrePorApartamento(registro.apartamento) : null;
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-[#0d1117] px-4 py-12 text-white sm:px-6 sm:py-16">
@@ -312,52 +317,68 @@ export default function Ute({ onVolver, onListo }: UteProps) {
         {buscoAlgo && (
           <div className="mt-6">
             {!registro ? (
-              <div className="flex items-start gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] p-5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400">
+              <div className="flex items-start gap-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-400/20 text-amber-300">
                   <TriangleAlert size={22} />
                 </div>
                 <div>
                   <p className="text-base font-semibold text-white">Apartamento no encontrado</p>
-                  <p className="mt-1 text-sm text-gray-300">
+                  <p className="mt-1 text-sm text-slate-100/80">
                     No hay datos cargados de UTE para ese número de apartamento.
                   </p>
                 </div>
               </div>
             ) : !registro.recibo ? (
-              <div className="flex items-start gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] p-5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400">
+              <div className="flex items-start gap-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-400/20 text-amber-300">
                   <TriangleAlert size={22} />
                 </div>
                 <div>
                   <p className="text-base font-semibold text-white">Sin contador asignado</p>
-                  <p className="mt-1 text-sm text-gray-300">{MENSAJE_SIN_CONTADOR}</p>
+                  <p className="mt-1 text-sm text-slate-100/80">{MENSAJE_SIN_CONTADOR}</p>
                 </div>
               </div>
             ) : torre ? (
-              <div className="flex items-start gap-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
+              <div className="flex items-start gap-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/20 text-emerald-300">
                   <Zap size={22} />
                 </div>
-                <div>
-                  <p className="text-base text-white">
-                    El depto <span className="font-bold">{registro.apartamento}</span> tiene el contador en la
-                    torre <span className="font-bold">{torre}</span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300/80">
+                    Depto {registro.apartamento}
                   </p>
-                  <p className="mt-1 text-sm text-emerald-400">
-                    Número de contador: {registro.recibo}
+                  <p className="mt-1.5 text-2xl font-bold leading-tight text-white">
+                    {torre}
                   </p>
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-black/30 px-3 py-1.5">
+                    <span className="text-[11px] uppercase tracking-wide text-slate-100/60">
+                      N.º de contador
+                    </span>
+                    <span className="font-mono text-base font-semibold text-emerald-300">
+                      {registro.recibo}
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div className="flex items-start gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] p-5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400">
+              <div className="flex items-start gap-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-400/20 text-amber-300">
                   <TriangleAlert size={22} />
                 </div>
                 <div>
-                  <p className="text-base font-semibold text-white">
-                    Contador {registro.recibo} — torre sin determinar
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-300/80">
+                    Depto {registro.apartamento}
                   </p>
-                  <p className="mt-1 text-sm text-gray-300">{MENSAJE_TORRE_NO_DETERMINADA}</p>
+                  <div className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-black/30 px-3 py-1.5">
+                    <span className="text-[11px] uppercase tracking-wide text-slate-100/60">
+                      N.º de contador
+                    </span>
+                    <span className="font-mono text-base font-semibold text-amber-300">
+                      {registro.recibo}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-base font-semibold text-white">Torre sin determinar</p>
+                  <p className="mt-1 text-sm text-slate-100/80">{MENSAJE_TORRE_NO_DETERMINADA}</p>
                 </div>
               </div>
             )}
