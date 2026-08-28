@@ -51,7 +51,7 @@ export interface Residente {
   apellido: string;
   telefono: string;
   email: string;
-  fechaInicio: string; // YYYY-MM-DD, desde cuándo vive/es dueño ahí
+  fechaInicio?: string; // YYYY-MM-DD — legado: ya no se pide al cargar, pero se conserva en docs viejos
   activo: boolean; // false = ya no vive ahí (se fue o se vendió el depto)
   fechaFin?: string; // YYYY-MM-DD, cuándo dejó de ser el residente activo
   autor: string;
@@ -172,7 +172,9 @@ function ResidenteCard({
               </span>
             )}
           </div>
-          <p className="mt-1 text-[11px] text-gray-500">Desde {formatearFecha(residente.fechaInicio)}</p>
+          {residente.fechaInicio && (
+            <p className="mt-1 text-[11px] text-gray-500">Desde {formatearFecha(residente.fechaInicio)}</p>
+          )}
         </div>
       </button>
 
@@ -255,7 +257,6 @@ interface DatosResidenteForm {
   apellido: string;
   telefono: string;
   email: string;
-  fechaInicio: string;
   vehiculo?: DatosVehiculoForm;
 }
 
@@ -287,7 +288,6 @@ function ResidenteModal({
   const [apellido, setApellido] = useState(valoresIniciales?.apellido ?? "");
   const [telefono, setTelefono] = useState(valoresIniciales?.telefono ?? "");
   const [email, setEmail] = useState(valoresIniciales?.email ?? "");
-  const [fechaInicio, setFechaInicio] = useState(valoresIniciales?.fechaInicio ?? hoyISO());
 
   // --- Vehículo opcional, se carga junto con el residente ---
   const [tieneVehiculo, setTieneVehiculo] = useState(false);
@@ -303,7 +303,6 @@ function ResidenteModal({
     if (!nombre.trim()) faltantes.push("Nombre");
     if (!apellido.trim()) faltantes.push("Apellido");
     if (!telefono.trim()) faltantes.push("Teléfono");
-    if (!fechaInicio) faltantes.push("Fecha de inicio");
     if (tieneVehiculo && !matriculaVehiculo.trim()) faltantes.push("Matrícula del vehículo");
 
     if (faltantes.length > 0) {
@@ -318,7 +317,6 @@ function ResidenteModal({
       apellido: apellido.trim(),
       telefono: telefono.trim(),
       email: email.trim(),
-      fechaInicio,
       vehiculo: tieneVehiculo
         ? {
             tipo: tipoVehiculo,
@@ -372,28 +370,17 @@ function ResidenteModal({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Apartamento</label>
-              <input
-                autoFocus={!bloquearApartamento}
-                type="text"
-                value={apartamento}
-                disabled={bloquearApartamento}
-                onChange={(e) => setApartamento(e.target.value)}
-                placeholder="Ej: 914"
-                className={`${inputClass} ${bloquearApartamento ? "cursor-not-allowed opacity-60" : ""}`}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Fecha de inicio</label>
-              <input
-                type="date"
-                value={fechaInicio}
-                onChange={(e) => setFechaInicio(e.target.value)}
-                className={inputClass}
-              />
-            </div>
+          <div>
+            <label className={labelClass}>Apartamento</label>
+            <input
+              autoFocus={!bloquearApartamento}
+              type="text"
+              value={apartamento}
+              disabled={bloquearApartamento}
+              onChange={(e) => setApartamento(e.target.value)}
+              placeholder="Ej: 914"
+              className={`${inputClass} ${bloquearApartamento ? "cursor-not-allowed opacity-60" : ""}`}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -616,7 +603,6 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         apellido: datos.apellido,
         telefono: datos.telefono,
         email: datos.email,
-        fechaInicio: datos.fechaInicio,
         activo: true,
         autor: usuario.nombre,
         fechaCreacion: new Date().toISOString(),
@@ -642,7 +628,6 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         apellido: datos.apellido,
         telefono: datos.telefono,
         email: datos.email,
-        fechaInicio: datos.fechaInicio,
       });
       await cargarResidentes();
       setModalEstado(null);
