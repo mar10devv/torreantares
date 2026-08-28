@@ -120,7 +120,7 @@ const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; co
   { nombre: "Parrilleros", icon: Beef, color: "orange" },
   { nombre: "Ingresos", icon: DoorOpen, color: "emerald" },
   { nombre: "Propietarios/Inquilinos", subtitulo: "Residentes fijos", icon: Home, color: "indigo" },
-  { nombre: "Cocheras/Coches", subtitulo: "Registro de vehículos", icon: Car, color: "cyan" },
+  { nombre: "Cocheras", subtitulo: "Registro de vehículos", icon: Car, color: "cyan" },
   { nombre: "UTE", icon: Zap, color: "yellow" },
   { nombre: "Contactos", subtitulo: "Reclamos / Empleados", icon: Users, color: "fuchsia" },
   { nombre: "Administración", icon: Settings, color: "slate" },
