@@ -3,6 +3,7 @@ import AddUserCard from "./AddUserCard";
 import CreateUserModal from "./CreateUserModal";
 import UserCard from "./UserCard";
 import IngresarPinModal from "./IngresarPinModal";
+import ConfirmarBorradoUsuarioModal from "./ConfirmarBorradoUsuarioModal";
 import Loader from "./Loader";
 import logo from "../assets/logo.png";
 import { obtenerUsuariosDeDB } from "../lib/firebase";
@@ -73,6 +74,12 @@ export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [usuarioIntentandoLogin, setUsuarioIntentandoLogin] = useState<Usuario | null>(null);
+
+  // Índice del usuario que se está por borrar, mientras se espera la
+  // confirmación de contraseña en ConfirmarBorradoUsuarioModal. null =
+  // no hay ningún borrado pendiente. El borrado real (handleDeleteUser)
+  // solo se ejecuta si la contraseña ingresada es correcta.
+  const [usuarioABorrarIndex, setUsuarioABorrarIndex] = useState<number | null>(null);
 
   // Se restaura al cargar la página: el usuario desde sessionStorage
   // (sobrevive a un F5, se borra si cerrás la pestaña/navegador), y la
@@ -189,8 +196,25 @@ export default function Home() {
     setEditingIndex(null);
   };
 
+  // Borrado real del usuario. Solo se llama después de confirmar la
+  // contraseña en ConfirmarBorradoUsuarioModal (ver handleSolicitarBorrado
+  // y handleConfirmarBorrado más abajo) — nunca directo desde la UserCard.
   const handleDeleteUser = (index: number) => {
     setUsuarios((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Se llama al tocar "Borrar" en una UserCard: en vez de borrar directo,
+  // guarda qué usuario se quiere borrar y abre el modal que pide la
+  // contraseña. El borrado efectivo (handleDeleteUser) recién ocurre si
+  // la contraseña ingresada es correcta (ver handleConfirmarBorrado).
+  const handleSolicitarBorrado = (index: number) => {
+    setUsuarioABorrarIndex(index);
+  };
+
+  const handleConfirmarBorrado = () => {
+    if (usuarioABorrarIndex === null) return;
+    handleDeleteUser(usuarioABorrarIndex);
+    setUsuarioABorrarIndex(null);
   };
 
   const handleEditUser = (index: number) => {
@@ -388,7 +412,7 @@ export default function Home() {
                         key={index}
                         usuario={usuario}
                         onEdit={() => handleEditUser(index)}
-                        onDelete={() => handleDeleteUser(index)}
+                        onDelete={() => handleSolicitarBorrado(index)}
                         onLogin={() => handleIntentarLogin(usuario)}
                       />
                     ))}
@@ -416,6 +440,12 @@ export default function Home() {
           />
         </>
       )}
+
+      <ConfirmarBorradoUsuarioModal
+        usuario={usuarioABorrarIndex !== null ? usuarios[usuarioABorrarIndex] : null}
+        onClose={() => setUsuarioABorrarIndex(null)}
+        onConfirmar={handleConfirmarBorrado}
+      />
     </>
   );
 }

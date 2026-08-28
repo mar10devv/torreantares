@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X } from "lucide-react";
+import { X, Lock } from "lucide-react";
 import { crearUsuarioEnDB } from "../lib/firebase";
 
 interface Usuario {
@@ -33,9 +33,15 @@ export default function CreateUserModal({
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
 
+  // --- Verificación de PIN actual (solo aplica en modo edición) ---
+  const [pinVerificado, setPinVerificado] = useState(false);
+  const [pinVerificacion, setPinVerificacion] = useState("");
+  const [errorVerificacion, setErrorVerificacion] = useState("");
+
   const esEdicion = usuarioEditando !== null;
 
-  // Cuando se abre el modal en modo edición, precarga los datos.
+  // Cuando se abre el modal en modo edición, precarga los datos (menos el PIN,
+  // que ahora se define desde cero una vez verificado el actual).
   // Cuando se abre en modo creación, arranca todo vacío.
   useEffect(() => {
     if (!isOpen) return;
@@ -45,7 +51,7 @@ export default function CreateUserModal({
       setCargo(usuarioEditando.cargo);
       setGmail(usuarioEditando.gmail);
       setTelefono(usuarioEditando.telefono);
-      setContrasena(usuarioEditando.contrasena);
+      setContrasena("");
     } else {
       setNombre("");
       setCargo("Recepcionista");
@@ -53,6 +59,12 @@ export default function CreateUserModal({
       setTelefono("");
       setContrasena("");
     }
+
+    // En modo edición siempre arranca sin verificar, así nadie puede
+    // tocar el formulario sin antes confirmar el PIN actual.
+    setPinVerificado(false);
+    setPinVerificacion("");
+    setErrorVerificacion("");
     setError("");
   }, [isOpen, usuarioEditando]);
 
@@ -65,6 +77,9 @@ export default function CreateUserModal({
     setTelefono("");
     setContrasena("");
     setError("");
+    setPinVerificado(false);
+    setPinVerificacion("");
+    setErrorVerificacion("");
   };
 
   const handleClose = () => {
@@ -74,12 +89,43 @@ export default function CreateUserModal({
   };
 
   // El PIN solo acepta dígitos y se corta a 4 caracteres.
+  const soloDigitos4 = (valor: string) => valor.replace(/\D/g, "").slice(0, 4);
+
+  const handlePinVerificacionChange = (valor: string) => {
+    setPinVerificacion(soloDigitos4(valor));
+    if (errorVerificacion) setErrorVerificacion("");
+  };
+
   const handlePinChange = (valor: string) => {
-    setContrasena(valor.replace(/\D/g, "").slice(0, 4));
+    setContrasena(soloDigitos4(valor));
+  };
+
+  const handleVerificarPin = () => {
+    if (!usuarioEditando) return;
+
+    if (!/^\d{1,4}$/.test(pinVerificacion)) {
+      setErrorVerificacion("Ingresá el PIN actual.");
+      return;
+    }
+
+    if (pinVerificacion !== usuarioEditando.contrasena) {
+      setErrorVerificacion("El PIN es incorrecto.");
+      return;
+    }
+
+    setErrorVerificacion("");
+    setPinVerificado(true);
   };
 
   const handleGuardar = async () => {
-    if (!nombre.trim() || !cargo.trim() || !gmail.trim() || !telefono.trim() || !contrasena.trim()) {
+    // Nadie debería llegar acá sin haber verificado el PIN actual en modo
+    // edición, pero lo bloqueamos igual por las dudas.
+    if (esEdicion && !pinVerificado) {
+      setError("Primero tenés que verificar el PIN actual.");
+      return;
+    }
+
+    if (!nombre.trim() || !cargo.trim() || !gmail.trim() || !telefono.trim()) {
       setError("Todos los campos son obligatorios.");
       return;
     }
@@ -90,7 +136,14 @@ export default function CreateUserModal({
       return;
     }
 
-    if (!/^\d{1,4}$/.test(contrasena)) {
+    // En creación el PIN es obligatorio. En edición es opcional: si se deja
+    // vacío, se mantiene el PIN que ya tenía el usuario.
+    if (!esEdicion && !contrasena.trim()) {
+      setError("Todos los campos son obligatorios.");
+      return;
+    }
+
+    if (contrasena.trim() && !/^\d{1,4}$/.test(contrasena)) {
       setError("El PIN debe tener solo números, máximo 4 dígitos.");
       return;
     }
@@ -102,7 +155,9 @@ export default function CreateUserModal({
       cargo,
       gmail: gmail.trim(),
       telefono: telefono.trim(),
-      contrasena,
+      contrasena: contrasena.trim()
+        ? contrasena
+        : (usuarioEditando as Usuario).contrasena,
     };
 
     if (esEdicion) {
@@ -127,6 +182,10 @@ export default function CreateUserModal({
     }
   };
 
+  // Modo edición, pero todavía no se verificó el PIN actual: mostramos
+  // solo la pantalla de verificación, sin exponer ni permitir tocar nada más.
+  const mostrarVerificacion = esEdicion && !pinVerificado;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md"
@@ -139,7 +198,11 @@ export default function CreateUserModal({
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <h2 className="text-2xl font-bold text-white">
-            {esEdicion ? "Editar usuario" : "Nuevo usuario"}
+            {mostrarVerificacion
+              ? "Verificar PIN actual"
+              : esEdicion
+              ? "Editar usuario"
+              : "Nuevo usuario"}
           </h2>
 
           <button
@@ -150,121 +213,184 @@ export default function CreateUserModal({
           </button>
         </div>
 
-        {/* Formulario */}
-        <div className="space-y-5">
+        {mostrarVerificacion ? (
+          /* --- Paso 1: verificar el PIN actual --- */
+          <div className="space-y-5">
+            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-4">
+              <Lock className="shrink-0 text-blue-400" size={20} />
+              <p className="text-sm text-gray-300">
+                Por seguridad, ingresá el PIN actual de{" "}
+                <span className="font-semibold text-white">
+                  {usuarioEditando?.nombre}
+                </span>{" "}
+                antes de poder modificar sus datos.
+              </p>
+            </div>
 
-          <div>
-            <label className="mb-2 block text-sm text-gray-300">
-              Nombre del empleado <span className="text-red-500">*</span>
-            </label>
+            <div>
+              <label className="mb-2 block text-sm text-gray-300">
+                PIN actual <span className="text-red-500">*</span>
+              </label>
 
-            <input
-              type="text"
-              required
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
-            />
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                required
+                value={pinVerificacion}
+                onChange={(e) => handlePinVerificacionChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleVerificarPin();
+                }}
+                maxLength={4}
+                placeholder="••••"
+                autoFocus
+                className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-center text-lg tracking-[0.5em] text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+              />
+            </div>
+
+            {errorVerificacion && (
+              <p className="text-sm text-red-500">{errorVerificacion}</p>
+            )}
+
+            <div className="mt-8 flex justify-end gap-4">
+              <button
+                onClick={handleClose}
+                className="rounded-xl border border-white/10 px-5 py-3 text-white transition hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={handleVerificarPin}
+                className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
+              >
+                Verificar
+              </button>
+            </div>
           </div>
+        ) : (
+          /* --- Paso 2 (o creación directa): formulario completo --- */
+          <>
+            <div className="space-y-5">
+              <div>
+                <label className="mb-2 block text-sm text-gray-300">
+                  Nombre del empleado <span className="text-red-500">*</span>
+                </label>
 
-          <div>
-            <label className="mb-2 block text-sm text-gray-300">
-              Cargo <span className="text-red-500">*</span>
-            </label>
+                <input
+                  type="text"
+                  required
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+                />
+              </div>
 
-            <select
-              required
-              value={cargo}
-              onChange={(e) => setCargo(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
-            >
-              <option className="bg-[#171b22] text-white" value="Recepcionista">
-                Recepcionista
-              </option>
-              <option className="bg-[#171b22] text-white" value="Administración">
-                Administración
-              </option>
-              <option className="bg-[#171b22] text-white" value="Limpieza">
-                Limpieza
-              </option>
-              <option className="bg-[#171b22] text-white" value="Mantenimiento">
-                Mantenimiento
-              </option>
-            </select>
-          </div>
+              <div>
+                <label className="mb-2 block text-sm text-gray-300">
+                  Cargo <span className="text-red-500">*</span>
+                </label>
 
-          <div>
-            <label className="mb-2 block text-sm text-gray-300">
-              Gmail <span className="text-red-500">*</span>
-            </label>
+                <select
+                  required
+                  value={cargo}
+                  onChange={(e) => setCargo(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+                >
+                  <option className="bg-[#171b22] text-white" value="Recepcionista">
+                    Recepcionista
+                  </option>
+                  <option className="bg-[#171b22] text-white" value="Administración">
+                    Administración
+                  </option>
+                  <option className="bg-[#171b22] text-white" value="Limpieza">
+                    Limpieza
+                  </option>
+                  <option className="bg-[#171b22] text-white" value="Mantenimiento">
+                    Mantenimiento
+                  </option>
+                </select>
+              </div>
 
-            <input
-              type="email"
-              required
-              value={gmail}
-              onChange={(e) => setGmail(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
-            />
-          </div>
+              <div>
+                <label className="mb-2 block text-sm text-gray-300">
+                  Gmail <span className="text-red-500">*</span>
+                </label>
 
-          <div>
-            <label className="mb-2 block text-sm text-gray-300">
-              Número de teléfono <span className="text-red-500">*</span>
-            </label>
+                <input
+                  type="email"
+                  required
+                  value={gmail}
+                  onChange={(e) => setGmail(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+                />
+              </div>
 
-            <input
-              type="tel"
-              required
-              value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
-            />
-          </div>
+              <div>
+                <label className="mb-2 block text-sm text-gray-300">
+                  Número de teléfono <span className="text-red-500">*</span>
+                </label>
 
-          <div>
-            <label className="mb-2 block text-sm text-gray-300">
-              PIN (máximo 4 dígitos) <span className="text-red-500">*</span>
-            </label>
+                <input
+                  type="tel"
+                  required
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+                />
+              </div>
 
-            <input
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              required
-              value={contrasena}
-              onChange={(e) => handlePinChange(e.target.value)}
-              maxLength={4}
-              placeholder="••••"
-              className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-center text-lg tracking-[0.5em] text-white outline-none transition focus:outline-2 focus:outline-blue-500"
-            />
-          </div>
+              <div>
+                <label className="mb-2 block text-sm text-gray-300">
+                  {esEdicion
+                    ? "Nuevo PIN (opcional)"
+                    : "PIN (máximo 4 dígitos)"}{" "}
+                  {!esEdicion && <span className="text-red-500">*</span>}
+                </label>
 
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  required={!esEdicion}
+                  value={contrasena}
+                  onChange={(e) => handlePinChange(e.target.value)}
+                  maxLength={4}
+                  placeholder="••••"
+                  className="w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-center text-lg tracking-[0.5em] text-white outline-none transition focus:outline-2 focus:outline-blue-500"
+                />
 
-        </div>
+                {esEdicion && (
+                  <p className="mt-2 text-xs text-gray-400">
+                    Dejalo vacío para mantener el PIN actual.
+                  </p>
+                )}
+              </div>
 
-        {/* Botones */}
-        <div className="mt-8 flex justify-end gap-4">
+              {error && <p className="text-sm text-red-500">{error}</p>}
+            </div>
 
-          <button
-            onClick={handleClose}
-            disabled={guardando}
-            className="rounded-xl border border-white/10 px-5 py-3 text-white transition hover:bg-white/10 disabled:opacity-50"
-          >
-            Cancelar
-          </button>
+            {/* Botones */}
+            <div className="mt-8 flex justify-end gap-4">
+              <button
+                onClick={handleClose}
+                disabled={guardando}
+                className="rounded-xl border border-white/10 px-5 py-3 text-white transition hover:bg-white/10 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
 
-          <button
-            onClick={handleGuardar}
-            disabled={guardando}
-            className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
-          >
-            {guardando ? "Guardando..." : esEdicion ? "Guardar cambios" : "Crear usuario"}
-          </button>
-
-        </div>
+              <button
+                onClick={handleGuardar}
+                disabled={guardando}
+                className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+              >
+                {guardando ? "Guardando..." : esEdicion ? "Guardar cambios" : "Crear usuario"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
