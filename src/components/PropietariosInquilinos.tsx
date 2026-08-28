@@ -14,13 +14,17 @@ import {
   KeyRound,
   X,
   Check,
+  CarFront,
+  Bike,
 } from "lucide-react";
 import ContactoDetalleModal, { type ContactoDetalle } from "./ContactoDetalleModal";
+import { MarcaInput, MARCAS_AUTO, MARCAS_MOTO, normalizarMatricula } from "./Cocheras";
 import {
   crearResidenteEnDB,
   obtenerResidentesDeDB,
   actualizarResidenteEnDB,
   eliminarResidenteEnDB,
+  crearVehiculoEnDB,
 } from "../lib/firebase";
 
 interface Usuario {
@@ -238,6 +242,12 @@ function ResidenteCard({
 /* Modal: crear / editar residente                              */
 /* ---------------------------------------------------------- */
 
+interface DatosVehiculoForm {
+  tipo: "auto" | "moto";
+  matricula: string;
+  marca: string;
+}
+
 interface DatosResidenteForm {
   apartamento: string;
   tipo: TipoResidente;
@@ -246,12 +256,18 @@ interface DatosResidenteForm {
   telefono: string;
   email: string;
   fechaInicio: string;
+  vehiculo?: DatosVehiculoForm;
 }
 
 function ResidenteModal({
   titulo,
   valoresIniciales,
   bloquearApartamento,
+  // Solo se ofrece cargar vehículo al dar de alta (crear/reemplazo). En
+  // edición de datos ya existentes no tocamos vehículos: eso se gestiona
+  // desde el propio módulo de Cocheras para no adivinar a cuál vehículo
+  // del residente correspondería el cambio.
+  permitirVehiculo,
   enviando,
   onClose,
   onGuardar,
@@ -260,6 +276,7 @@ function ResidenteModal({
   valoresIniciales?: Partial<DatosResidenteForm>;
   /** true cuando viene de "Nuevo propietario/inquilino": el depto ya está fijado. */
   bloquearApartamento?: boolean;
+  permitirVehiculo?: boolean;
   enviando?: boolean;
   onClose: () => void;
   onGuardar: (datos: DatosResidenteForm) => void;
@@ -272,6 +289,14 @@ function ResidenteModal({
   const [email, setEmail] = useState(valoresIniciales?.email ?? "");
   const [fechaInicio, setFechaInicio] = useState(valoresIniciales?.fechaInicio ?? hoyISO());
 
+  // --- Vehículo opcional, se carga junto con el residente ---
+  const [tieneVehiculo, setTieneVehiculo] = useState(false);
+  const [tipoVehiculo, setTipoVehiculo] = useState<"auto" | "moto">("auto");
+  const [matriculaVehiculo, setMatriculaVehiculo] = useState("");
+  const [marcaVehiculo, setMarcaVehiculo] = useState("");
+
+  const marcasDisponibles = tipoVehiculo === "auto" ? MARCAS_AUTO : MARCAS_MOTO;
+
   const handleConfirmar = () => {
     const faltantes: string[] = [];
     if (!apartamento.trim()) faltantes.push("Apartamento");
@@ -279,6 +304,7 @@ function ResidenteModal({
     if (!apellido.trim()) faltantes.push("Apellido");
     if (!telefono.trim()) faltantes.push("Teléfono");
     if (!fechaInicio) faltantes.push("Fecha de inicio");
+    if (tieneVehiculo && !matriculaVehiculo.trim()) faltantes.push("Matrícula del vehículo");
 
     if (faltantes.length > 0) {
       window.alert(`Faltan completar: ${faltantes.join(", ")}`);
@@ -293,6 +319,13 @@ function ResidenteModal({
       telefono: telefono.trim(),
       email: email.trim(),
       fechaInicio,
+      vehiculo: tieneVehiculo
+        ? {
+            tipo: tipoVehiculo,
+            matricula: matriculaVehiculo.trim().toUpperCase(),
+            marca: marcaVehiculo.trim(),
+          }
+        : undefined,
     });
   };
 
@@ -303,7 +336,7 @@ function ResidenteModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-3xl border border-white/10 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-white/10 bg-[#171b22]/95 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
       >
         <div className="mb-6 flex items-start justify-between">
           <h2 className="text-xl font-bold text-white">{titulo}</h2>
@@ -409,6 +442,73 @@ function ResidenteModal({
             </div>
           </div>
 
+          {/* Vehículo opcional: solo al dar de alta un residente nuevo,
+              para cargar todo junto y no hacer perder tiempo agregándolo
+              aparte desde Cocheras. */}
+          {permitirVehiculo && (
+            <div className="mt-1 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium text-white">
+                <input
+                  type="checkbox"
+                  checked={tieneVehiculo}
+                  onChange={(e) => setTieneVehiculo(e.target.checked)}
+                  className="h-4 w-4 rounded border-white/20 bg-white/5 accent-blue-600"
+                />
+                ¿Tiene auto o moto? Cargalo de una vez
+              </label>
+
+              {tieneVehiculo && (
+                <div className="mt-3 flex flex-col gap-3">
+                  <div className="flex rounded-xl border border-white/10 bg-white/5 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTipoVehiculo("auto")}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                        tipoVehiculo === "auto" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      <CarFront size={15} />
+                      Auto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTipoVehiculo("moto")}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                        tipoVehiculo === "moto" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      <Bike size={15} />
+                      Moto
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Matrícula</label>
+                      <input
+                        type="text"
+                        value={matriculaVehiculo}
+                        onChange={(e) => setMatriculaVehiculo(e.target.value)}
+                        placeholder="Ej: ABC 1234"
+                        className={`${inputClass} uppercase`}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>
+                        Marca <span className="text-gray-500">· opcional</span>
+                      </label>
+                      <MarcaInput value={marcaVehiculo} onChange={setMarcaVehiculo} marcas={marcasDisponibles} />
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-gray-500">
+                    El nombre, depto y contacto del vehículo se toman de los datos de arriba.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mt-2 flex gap-2">
             <button
               onClick={onClose}
@@ -475,15 +575,53 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Si el formulario venía con datos de vehículo, lo crea en la colección
+  // de Cocheras/vehículos reusando nombre, apellido, depto, teléfono y
+  // correo del residente recién cargado — así no hay que volver a tipearlos
+  // en el módulo de Cocheras.
+  const crearVehiculoSiCorresponde = async (datos: DatosResidenteForm) => {
+    if (!datos.vehiculo) return;
+
+    try {
+      await crearVehiculoEnDB({
+        tipo: datos.vehiculo.tipo,
+        matricula: normalizarMatricula(datos.vehiculo.matricula),
+        matriculaOriginal: datos.vehiculo.matricula,
+        marca: datos.vehiculo.marca,
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        apartamento: datos.apartamento,
+        telefono: datos.telefono,
+        correo: datos.email,
+        autor: usuario.nombre,
+        fechaCreacion: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("Error al crear vehículo en Firestore:", err);
+      // No bloqueamos el alta del residente por esto: ya quedó guardado.
+      // Avisamos aparte para que se pueda cargar el vehículo a mano desde Cocheras.
+      window.alert(
+        "El propietario/inquilino se guardó bien, pero no se pudo registrar el vehículo. Podés cargarlo a mano desde el módulo de Cocheras."
+      );
+    }
+  };
+
   const handleGuardarNuevo = async (datos: DatosResidenteForm) => {
     try {
       setEnviando(true);
       await crearResidenteEnDB({
-        ...datos,
+        apartamento: datos.apartamento,
+        tipo: datos.tipo,
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        telefono: datos.telefono,
+        email: datos.email,
+        fechaInicio: datos.fechaInicio,
         activo: true,
         autor: usuario.nombre,
         fechaCreacion: new Date().toISOString(),
       });
+      await crearVehiculoSiCorresponde(datos);
       await cargarResidentes();
       setModalEstado(null);
     } catch (err) {
@@ -497,7 +635,15 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
   const handleGuardarEdicion = async (id: string, datos: DatosResidenteForm) => {
     try {
       setEnviando(true);
-      await actualizarResidenteEnDB(id, datos);
+      await actualizarResidenteEnDB(id, {
+        apartamento: datos.apartamento,
+        tipo: datos.tipo,
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        telefono: datos.telefono,
+        email: datos.email,
+        fechaInicio: datos.fechaInicio,
+      });
       await cargarResidentes();
       setModalEstado(null);
     } catch (err) {
@@ -625,6 +771,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
       {modalEstado?.modo === "crear" && (
         <ResidenteModal
           titulo="Nuevo propietario/inquilino"
+          permitirVehiculo
           enviando={enviando}
           onClose={() => setModalEstado(null)}
           onGuardar={handleGuardarNuevo}
@@ -646,6 +793,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
           titulo={modalEstado.tipo === "propietario" ? "Nuevo propietario" : "Nuevo inquilino"}
           valoresIniciales={{ apartamento: modalEstado.apartamento, tipo: modalEstado.tipo }}
           bloquearApartamento
+          permitirVehiculo
           enviando={enviando}
           onClose={() => setModalEstado(null)}
           onGuardar={handleGuardarNuevo}
