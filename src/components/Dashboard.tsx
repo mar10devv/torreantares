@@ -15,6 +15,7 @@ import {
   X,
   CircleHelp,
   Tag,
+  Lock,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import type { Ingreso } from "./Ingresos";
@@ -28,6 +29,11 @@ interface Usuario {
   gmail: string;
   telefono: string;
   contrasena: string;
+  // Viene de Firestore (colección "usuarios", campo creado en
+  // crearUsuarioEnDB). Se marca opcional porque los usuarios cargados
+  // antes de este cambio no lo tienen guardado — para esos, tratamos
+  // "undefined" igual que "false" (sin acceso) más abajo.
+  accesoAdministracion?: boolean;
 }
 
 interface DashboardProps {
@@ -325,6 +331,39 @@ function ModuloEnDesarrolloModal({
   );
 }
 
+// Se muestra en vez de navegar a "Administración" cuando el usuario
+// logueado no tiene accesoAdministracion === true en su documento de
+// Firestore (colección "usuarios").
+function SinAccesoAdministracionModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(0,0,0,0.7)] p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-3xl border border-[rgba(255,255,255,0.1)] bg-[#171b22] p-6 text-center shadow-2xl"
+      >
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(239,68,68,0.15)] text-red-400">
+          <Lock size={22} />
+        </div>
+
+        <h2 className="mt-4 text-lg font-bold text-white">No tenés acceso a Administración</h2>
+        <p className="mt-2 text-sm text-gray-400">
+          Acá Administración lleva la contabilidad y las facturas del dinero que pasa por recepción.
+        </p>
+
+        <button
+          onClick={onClose}
+          className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: DashboardProps) {
   const [descartadas, setDescartadas] = useState<string[]>([]);
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
@@ -333,6 +372,9 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
   // Dashboard controlado por este estado, así no depende de que la app
   // padre conozca esa ruta.
   const [mostrarSoporte, setMostrarSoporte] = useState(false);
+  // Se activa cuando el usuario toca "Administración" sin tener
+  // accesoAdministracion === true.
+  const [mostrarSinAcceso, setMostrarSinAcceso] = useState(false);
   const notificacionesVisibles = notificaciones.filter((n) => !descartadas.includes(n.id));
 
   // Módulos que todavía no están listos para usarse: en vez de navegar,
@@ -343,6 +385,10 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
   const handleClickModulo = (nombre: string) => {
     if (nombre === "Soporte") {
       setMostrarSoporte(true);
+      return;
+    }
+    if (nombre === "Administración" && !usuario.accesoAdministracion) {
+      setMostrarSinAcceso(true);
       return;
     }
     if (MODULOS_NO_DISPONIBLES.has(nombre)) {
@@ -468,6 +514,10 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
           nombre={moduloEnDesarrollo}
           onClose={() => setModuloEnDesarrollo(null)}
         />
+      )}
+
+      {mostrarSinAcceso && (
+        <SinAccesoAdministracionModal onClose={() => setMostrarSinAcceso(false)} />
       )}
 
       {notificacionesVisibles.length > 0 && (
