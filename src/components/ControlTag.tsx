@@ -13,7 +13,16 @@ import {
   CircleDollarSign,
   Hash,
 } from "lucide-react";
-import { crearNotaEnDB, crearControlTagEnDB, obtenerControlesTagsDeDB, actualizarControlTagEnDB, eliminarControlTagEnDB } from "../lib/firebase";
+import {
+  crearNotaEnDB,
+  crearControlTagEnDB,
+  obtenerControlesTagsDeDB,
+  actualizarControlTagEnDB,
+  eliminarControlTagEnDB,
+  crearFacturaEnDB,
+  generarProximoNumeroFacturaEnDB,
+} from "../lib/firebase";
+import { CONFIG_FACTURA } from "./Facturas";
 
 interface Usuario {
   nombre: string;
@@ -93,6 +102,43 @@ function generarContenidoNota(registro: RegistroControlTag): string {
 
   const monto = registro.monto ?? 0;
   return `${registro.apartamento} Compro ${tipoTexto}, quedo pendiente para cobrar $${monto}`;
+}
+
+// Genera la factura automática cuando un control/tag queda pagado (ya sea
+// que se cargó directamente como "Pagado", o que se marcó como pagado
+// después de estar pendiente). Usa el mismo generador de número atómico y
+// el mismo CONFIG_FACTURA que ya usa Facturas.tsx, así que cuando llegue
+// el RUT/CAE definitivo esto se actualiza solo sin tocar nada acá.
+//
+// NOTA: la factura queda "provisoria" (como el resto de la app) hasta que
+// se complete CONFIG_FACTURA.numeroCAE en Facturas.tsx — igual se genera
+// y se guarda ahora, para no perder la numeración ni el registro contable
+// mientras tanto.
+async function crearFacturaDeControlTag(
+  registro: RegistroControlTag,
+  usuario: Usuario
+) {
+  const siguiente = await generarProximoNumeroFacturaEnDB();
+  const numero = `${CONFIG_FACTURA.prefijoSerie}${String(siguiente).padStart(4, "0")}`;
+  const tipoTexto = TIPO_LABEL[registro.tipo];
+  const importe = registro.monto ?? MONTO_POR_DEFECTO[registro.tipo];
+
+  await crearFacturaEnDB({
+    numero,
+    titulo: `Fac. ${tipoTexto} (Depto ${registro.apartamento})`,
+    fecha: new Date().toISOString().slice(0, 10),
+    unidad: registro.apartamento,
+    nombreCliente: `${registro.nombre} ${registro.apellido}`,
+    emailCliente: "",
+    concepto: `Venta de ${tipoTexto.toLowerCase()}${
+      registro.numeroSerie ? ` (N.º ${registro.numeroSerie})` : ""
+    }`,
+    importe,
+    reservaId: registro.id, // reutiliza el mismo campo que usan las reservas de parrillero, acá apunta al registro de control/tag que originó la factura
+    estado: "nueva",
+    autor: usuario.nombre,
+    fechaCreacion: new Date().toISOString(),
+  });
 }
 
 const inputClass =
@@ -622,6 +668,18 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       const nuevo: RegistroControlTag = { id, ...nuevoSinId };
 
       await publicarNota(generarContenidoNota(nuevo));
+
+      if (nuevo.estadoPago === "pagado") {
+        try {
+          await crearFacturaDeControlTag(nuevo, usuario);
+        } catch (err) {
+          console.error("Error al generar la factura automática de Control/Tag:", err);
+          window.alert(
+            "El registro se guardó, pero no se pudo generar la factura automáticamente."
+          );
+        }
+      }
+
       await recargarRegistros();
       setModalEstado(null);
     } catch (err) {
@@ -666,6 +724,15 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       await publicarNota(
         `${registro.apartamento} Se cobró el ${tipoTexto} que estaba pendiente, ahora queda pago`
       );
+
+      try {
+        await crearFacturaDeControlTag({ ...registro, estadoPago: "pagado" }, usuario);
+      } catch (err) {
+        console.error("Error al generar la factura automática de Control/Tag:", err);
+        window.alert(
+          "Se marcó como pagado, pero no se pudo generar la factura automáticamente."
+        );
+      }
 
       const datosActualizados = await recargarRegistros();
       const actualizado = datosActualizados.find((r) => r.id === registro.id);
