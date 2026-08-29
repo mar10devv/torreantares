@@ -43,7 +43,25 @@ interface DashboardProps {
   onListo?: () => void;
 }
 
-type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo" | "gray" | "red";
+type Color =
+  | "blue"
+  | "orange"
+  | "emerald"
+  | "cyan"
+  | "yellow"
+  | "fuchsia"
+  | "slate"
+  | "indigo"
+  | "gray"
+  | "red";
+
+interface ColorClases {
+  bg: string;
+  text: string;
+  border: string;
+  gradiente: string;
+  glow: string;
+}
 
 // IMPORTANTE — por qué acá no usamos from-blue-500/to-blue-700 ni bg-blue-500/15:
 // Tailwind v4 compila esas clases con color-mix(in oklab, ...) por debajo,
@@ -53,10 +71,7 @@ type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "sl
 // oklch() ya esté arreglado. Se reemplaza todo por valores arbitrarios de
 // Tailwind (bg-[rgba(...)], bg-[linear-gradient(...)]) que generan CSS
 // plano sin pasar por oklch() ni color-mix() en ningún punto.
-const COLOR_CLASSES: Record<
-  Color,
-  { bg: string; text: string; border: string; gradiente: string; glow: string }
-> = {
+const COLOR_CLASSES: Record<Color, ColorClases> = {
   blue: {
     bg: "bg-[rgba(59,130,246,0.15)]",
     text: "text-blue-400",
@@ -129,7 +144,14 @@ const COLOR_CLASSES: Record<
   },
 };
 
-const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; color: Color }[] = [
+interface ModuloInfo {
+  nombre: string;
+  subtitulo?: string;
+  icon: typeof StickyNote;
+  color: Color;
+}
+
+const modulos: ModuloInfo[] = [
   { nombre: "Notas", icon: StickyNote, color: "blue" },
   { nombre: "Parrilleros", icon: Beef, color: "orange" },
   { nombre: "Ingresos", icon: DoorOpen, color: "emerald" },
@@ -167,10 +189,14 @@ interface Notificacion {
   modulo: "Ingresos" | "Parrilleros";
 }
 
-const NOTIF_ESTILOS: Record<
-  TipoNotificacion,
-  { icon: typeof TriangleAlert; iconBg: string; iconColor: string; border: string }
-> = {
+interface NotifEstilo {
+  icon: typeof TriangleAlert;
+  iconBg: string;
+  iconColor: string;
+  border: string;
+}
+
+const NOTIF_ESTILOS: Record<TipoNotificacion, NotifEstilo> = {
   vence_hoy: {
     icon: Bell,
     iconBg: "bg-[rgba(245,158,11,0.15)]",
@@ -471,7 +497,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
           </button>
         </div>
 
-        <div className="grid w-full max-w-4xl grid-cols-2 gap-6 sm:grid-cols-3">
+        <div className="grid w-full max-w-4xl grid-cols-2 gap-6 sm:grid-cols-4">
           {modulos.map(({ nombre, subtitulo, icon: Icon, color }) => {
             const clases = COLOR_CLASSES[color];
             const noDisponible = MODULOS_NO_DISPONIBLES.has(nombre);

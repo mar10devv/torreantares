@@ -71,73 +71,110 @@ function FacturaDocumento({ factura }: { factura: Factura }) {
   const esProvisoria = !CONFIG_FACTURA.numeroCAE;
 
   return (
-    <div className="w-full bg-white p-8 text-[#1a1a1a]">
+    <div style={{ width: "100%", backgroundColor: "#ffffff", padding: "32px", color: "#1a1a1a" }}>
       {esProvisoria && (
-        <div className="mb-4 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-700">
+        <div
+          style={{
+            marginBottom: "16px",
+            borderRadius: "6px",
+            border: "1px solid #fbbf24",
+            backgroundColor: "#fffbeb",
+            padding: "8px 12px",
+            textAlign: "center",
+            fontSize: "12px",
+            fontWeight: 500,
+            color: "#b45309",
+          }}
+        >
           Comprobante provisorio — pendiente de autorización DGI (CAE)
         </div>
       )}
 
-      <div className="mb-6 flex items-start justify-between border-b border-gray-200 pb-4">
-        <div className="flex items-center gap-3">
+      <div
+        style={{
+          marginBottom: "24px",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          borderBottom: "1px solid #e5e7eb",
+          paddingBottom: "16px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <img
-  src={CONFIG_FACTURA.logo.src ?? CONFIG_FACTURA.logo}
-  alt=""
-  className="h-12 w-12 object-contain"
-  style={{ filter: "invert(1)" }}
-/>
+            src={CONFIG_FACTURA.logo.src ?? CONFIG_FACTURA.logo}
+            alt=""
+            style={{ height: "48px", width: "48px", objectFit: "contain", filter: "invert(1)" }}
+          />
           <div>
-            <p className="text-lg font-bold">{CONFIG_FACTURA.nombreEmisor}</p>
-            <p className="text-xs text-gray-500">{CONFIG_FACTURA.rut}</p>
+            <p style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>{CONFIG_FACTURA.nombreEmisor}</p>
+            <p style={{ fontSize: "12px", color: "#6b7280", margin: 0 }}>{CONFIG_FACTURA.rut}</p>
           </div>
         </div>
-        <div className="text-right">
-          <p className="text-sm font-semibold uppercase tracking-wide text-gray-500">Factura</p>
-          <p className="text-xl font-bold">{factura.numero}</p>
+        <div style={{ textAlign: "right" }}>
+          <p style={{ fontSize: "14px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#6b7280", margin: 0 }}>
+            Factura
+          </p>
+          <p style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>{factura.numero}</p>
           {CONFIG_FACTURA.numeroCAE && (
-            <p className="text-[10px] text-gray-400">CAE: {CONFIG_FACTURA.numeroCAE}</p>
+            <p style={{ fontSize: "10px", color: "#9ca3af", margin: 0 }}>CAE: {CONFIG_FACTURA.numeroCAE}</p>
           )}
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 text-sm">
+      <div style={{ marginBottom: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "14px" }}>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Cliente</p>
-          <p className="font-medium">{factura.nombreCliente}</p>
-          <p className="text-gray-500">Unidad {factura.unidad}</p>
-          {factura.emailCliente && <p className="text-gray-500">{factura.emailCliente}</p>}
+          <p style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#9ca3af", margin: 0 }}>
+            Cliente
+          </p>
+          <p style={{ fontWeight: 500, margin: "2px 0" }}>{factura.nombreCliente}</p>
+          <p style={{ color: "#6b7280", margin: 0 }}>Unidad {factura.unidad}</p>
+          {factura.emailCliente && <p style={{ color: "#6b7280", margin: 0 }}>{factura.emailCliente}</p>}
         </div>
-        <div className="text-right">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Fecha</p>
-          <p className="font-medium">{formatearFecha(factura.fecha)}</p>
+        <div style={{ textAlign: "right" }}>
+          <p style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#9ca3af", margin: 0 }}>
+            Fecha
+          </p>
+          <p style={{ fontWeight: 500, margin: "2px 0" }}>{formatearFecha(factura.fecha)}</p>
         </div>
       </div>
 
-      <table className="mb-6 w-full text-sm">
+      <table style={{ marginBottom: "24px", width: "100%", fontSize: "14px", borderCollapse: "collapse" }}>
         <thead>
-          <tr className="border-b border-gray-300 text-left text-xs uppercase tracking-wide text-gray-400">
-            <th className="py-2">Concepto</th>
-            <th className="py-2 text-right">Importe</th>
+          <tr style={{ borderBottom: "1px solid #d1d5db", textAlign: "left", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#9ca3af" }}>
+            <th style={{ paddingBottom: "8px", paddingTop: "8px", fontWeight: 600 }}>Concepto</th>
+            <th style={{ paddingBottom: "8px", paddingTop: "8px", textAlign: "right", fontWeight: 600 }}>Importe</th>
           </tr>
         </thead>
         <tbody>
-          <tr className="border-b border-gray-100">
-            <td className="py-3">{factura.concepto}</td>
-            <td className="py-3 text-right">{formatearImporte(factura.importe)}</td>
+          <tr style={{ borderBottom: "1px solid #f3f4f6" }}>
+            <td style={{ paddingTop: "12px", paddingBottom: "12px" }}>{factura.concepto}</td>
+            <td style={{ paddingTop: "12px", paddingBottom: "12px", textAlign: "right" }}>
+              {formatearImporte(factura.importe)}
+            </td>
           </tr>
         </tbody>
       </table>
 
-      <div className="flex justify-end">
-        <div className="w-48">
-          <div className="flex justify-between border-t border-gray-300 pt-2 text-base font-bold">
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ width: "192px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              borderTop: "1px solid #d1d5db",
+              paddingTop: "8px",
+              fontSize: "16px",
+              fontWeight: 700,
+            }}
+          >
             <span>Total</span>
             <span>{formatearImporte(factura.importe)}</span>
           </div>
         </div>
       </div>
 
-      <p className="mt-8 text-center text-[10px] text-gray-400">
+      <p style={{ marginTop: "32px", textAlign: "center", fontSize: "10px", color: "#9ca3af" }}>
         Emitido por {factura.autor} · {CONFIG_FACTURA.nombreEmisor}
       </p>
     </div>
