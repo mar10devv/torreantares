@@ -461,9 +461,13 @@ function RegistroModal({
 function RegistroDetalleModal({
   registro,
   onClose,
+  onMarcarComoPagado,
+  marcandoPago,
 }: {
   registro: RegistroControlTag;
   onClose: () => void;
+  onMarcarComoPagado: () => void;
+  marcandoPago?: boolean;
 }) {
   const esControl = registro.tipo === "control";
   const esPagado = registro.estadoPago === "pagado";
@@ -523,6 +527,19 @@ function RegistroDetalleModal({
         ) : (
           <p className="mt-5 text-sm text-gray-500">No se cargó número de serie.</p>
         )}
+
+        {/* Solo se muestra si está pendiente: permite cobrarlo y pasarlo
+            a pagado sin tener que abrir "Editar datos". */}
+        {!esPagado && (
+          <button
+            onClick={onMarcarComoPagado}
+            disabled={marcandoPago}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+          >
+            <Check size={16} />
+            {marcandoPago ? "Guardando…" : "Marcar como pagado"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -539,6 +556,7 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
   const [modalEstado, setModalEstado] = useState<EstadoModal>(null);
   const [enviando, setEnviando] = useState(false);
   const [seleccionado, setSeleccionado] = useState<RegistroControlTag | null>(null);
+  const [marcandoPagoId, setMarcandoPagoId] = useState<string | null>(null);
 
   const [registros, setRegistros] = useState<RegistroControlTag[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -570,16 +588,13 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Crea la Nota automática asociada a una venta de control/tag. Si falla
-  // (por ejemplo sin conexión), el registro igual queda guardado — solo se
-  // avisa que la nota no se pudo publicar, para no perder la venta por un
-  // problema de red.
-  const publicarNotaAutomatica = async (registro: RegistroControlTag) => {
+  // Publica una Nota automática en la colección "notas". Si falla (por
+  // ejemplo sin conexión), el registro igual queda guardado — solo se
+  // avisa que la nota no se pudo publicar, para no perder la operación
+  // por un problema de red.
+  const publicarNota = async (contenido: string) => {
     try {
-      await crearNotaEnDB({
-        contenido: generarContenidoNota(registro),
-        autor: usuario.nombre,
-      });
+      await crearNotaEnDB({ contenido, autor: usuario.nombre });
     } catch (err) {
       console.error("Error al crear la nota automática de Control/Tag:", err);
       window.alert(
@@ -606,7 +621,7 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       const id = await crearControlTagEnDB(nuevoSinId);
       const nuevo: RegistroControlTag = { id, ...nuevoSinId };
 
-      await publicarNotaAutomatica(nuevo);
+      await publicarNota(generarContenidoNota(nuevo));
       await recargarRegistros();
       setModalEstado(null);
     } catch (err) {
@@ -636,6 +651,30 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       window.alert("No se pudieron guardar los cambios. Intentá de nuevo.");
     } finally {
       setEnviando(false);
+    }
+  };
+
+  // Se dispara desde el modal de detalle: pasa un registro pendiente a
+  // pagado en un solo paso, sin tener que abrir "Editar datos". Además
+  // publica una nota avisando que se cobró, para que quede constancia.
+  const handleMarcarComoPagado = async (registro: RegistroControlTag) => {
+    setMarcandoPagoId(registro.id);
+    try {
+      await actualizarControlTagEnDB(registro.id, { estadoPago: "pagado" });
+
+      const tipoTexto = TIPO_LABEL[registro.tipo];
+      await publicarNota(
+        `${registro.apartamento} Se cobró el ${tipoTexto} que estaba pendiente, ahora queda pago`
+      );
+
+      const datosActualizados = await recargarRegistros();
+      const actualizado = datosActualizados.find((r) => r.id === registro.id);
+      setSeleccionado(actualizado ?? { ...registro, estadoPago: "pagado" });
+    } catch (err) {
+      console.error("Error al marcar el registro como pagado:", err);
+      window.alert("No se pudo marcar como pagado. Intentá de nuevo.");
+    } finally {
+      setMarcandoPagoId(null);
     }
   };
 
@@ -752,7 +791,12 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       )}
 
       {seleccionado && (
-        <RegistroDetalleModal registro={seleccionado} onClose={() => setSeleccionado(null)} />
+        <RegistroDetalleModal
+          registro={seleccionado}
+          onClose={() => setSeleccionado(null)}
+          onMarcarComoPagado={() => handleMarcarComoPagado(seleccionado)}
+          marcandoPago={marcandoPagoId === seleccionado.id}
+        />
       )}
     </main>
   );
