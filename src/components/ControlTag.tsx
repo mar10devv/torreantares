@@ -13,7 +13,7 @@ import {
   CircleDollarSign,
   Hash,
 } from "lucide-react";
-import { crearNotaEnDB } from "../lib/firebase";
+import { crearNotaEnDB, crearControlTagEnDB, obtenerControlesTagsDeDB, actualizarControlTagEnDB, eliminarControlTagEnDB } from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -32,15 +32,14 @@ interface ControlTagProps {
 export type TipoControlTag = "control" | "tag";
 export type EstadoPago = "pagado" | "pendiente";
 
-// NOTA: por ahora este registro vive solo en memoria (useState), como se
-// acordó — todavía no está conectado a Firestore. Cuando se migre, el
-// patrón a seguir es el mismo que ya usan PropietariosInquilinos.tsx y
-// Cocheras.tsx (crear/obtener/actualizar/eliminar en lib/firebase.js),
-// nada más hay que reemplazar las funciones handle* de abajo.
+// Registro de controles y tags, guardado en la colección "controlesTags"
+// de Firestore (ver lib/firebase.js: crearControlTagEnDB,
+// obtenerControlesTagsDeDB, actualizarControlTagEnDB,
+// eliminarControlTagEnDB) — mismo patrón que "residentes".
 //
-// Lo que SÍ está conectado desde ahora es la creación automática de una
-// Nota (vía crearNotaEnDB) cada vez que se registra una venta de
-// control/tag — ver generarContenidoNota() y handleGuardarNuevo().
+// Además, cada venta nueva dispara automáticamente una Nota (vía
+// crearNotaEnDB) en la colección "notas" — ver generarContenidoNota() y
+// handleGuardarNuevo().
 export interface RegistroControlTag {
   id: string;
   apartamento: string;
@@ -79,12 +78,6 @@ const MONTO_POR_DEFECTO: Record<TipoControlTag, number> = {
   control: 650,
   tag: 450,
 };
-
-function generarId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 // Arma el texto de la nota automática que se publica en "Notas" cada vez
 // que se vende un control o un tag. El depto siempre va primero, como se
@@ -547,21 +540,40 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
   const [enviando, setEnviando] = useState(false);
   const [seleccionado, setSeleccionado] = useState<RegistroControlTag | null>(null);
 
-  // Por ahora en memoria — ver nota junto a RegistroControlTag más arriba
-  // sobre la futura migración a Firestore.
   const [registros, setRegistros] = useState<RegistroControlTag[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState("");
+
+  // Trae todos los registros de Firestore. Se usa al montar la pantalla y
+  // después de cada crear/editar/eliminar, para que lo que se ve siempre
+  // refleje lo que hay guardado (mismo patrón que Notas.tsx).
+  const recargarRegistros = async () => {
+    try {
+      setErrorCarga("");
+      const datos = (await obtenerControlesTagsDeDB()) as unknown as RegistroControlTag[];
+      setRegistros(datos);
+      return datos;
+    } catch (err) {
+      console.error("Error al cargar controles/tags desde Firestore:", err);
+      setErrorCarga("No se pudieron cargar los registros. Revisá tu conexión.");
+      return [];
+    }
+  };
 
   useEffect(() => {
-    // No hay fetch todavía (datos en memoria): se avisa "listo" enseguida
-    // para no bloquear la navegación, igual que hacen las demás pantallas
-    // mientras cargan.
-    onListo?.();
+    (async () => {
+      setCargando(true);
+      await recargarRegistros();
+      setCargando(false);
+      onListo?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Crea la Nota automática asociada a una venta de control/tag. Si falla
-  // (por ejemplo sin conexión), el registro igual queda guardado en
-  // memoria — solo se avisa que la nota no se pudo publicar, para no
-  // perder la venta por un problema de red.
+  // (por ejemplo sin conexión), el registro igual queda guardado — solo se
+  // avisa que la nota no se pudo publicar, para no perder la venta por un
+  // problema de red.
   const publicarNotaAutomatica = async (registro: RegistroControlTag) => {
     try {
       await crearNotaEnDB({
@@ -578,54 +590,68 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
 
   const handleGuardarNuevo = async (datos: DatosRegistroForm) => {
     setEnviando(true);
-    const nuevo: RegistroControlTag = {
-      id: generarId(),
-      apartamento: datos.apartamento,
-      nombre: datos.nombre,
-      apellido: datos.apellido,
-      numeroSerie: datos.numeroSerie || undefined,
-      tipo: datos.tipo,
-      estadoPago: datos.estadoPago,
-      monto: datos.monto ? Number(datos.monto) : undefined,
-      autor: usuario.nombre,
-      fechaCreacion: new Date().toISOString(),
-    };
+    try {
+      const nuevoSinId = {
+        apartamento: datos.apartamento,
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        numeroSerie: datos.numeroSerie || undefined,
+        tipo: datos.tipo,
+        estadoPago: datos.estadoPago,
+        monto: datos.monto ? Number(datos.monto) : undefined,
+        autor: usuario.nombre,
+        fechaCreacion: new Date().toISOString(),
+      };
 
-    setRegistros((prev) => [...prev, nuevo]);
-    await publicarNotaAutomatica(nuevo);
+      const id = await crearControlTagEnDB(nuevoSinId);
+      const nuevo: RegistroControlTag = { id, ...nuevoSinId };
 
-    setEnviando(false);
-    setModalEstado(null);
+      await publicarNotaAutomatica(nuevo);
+      await recargarRegistros();
+      setModalEstado(null);
+    } catch (err) {
+      console.error("Error al crear el registro de control/tag:", err);
+      window.alert("No se pudo guardar el registro. Intentá de nuevo.");
+    } finally {
+      setEnviando(false);
+    }
   };
 
-  const handleGuardarEdicion = (id: string, datos: DatosRegistroForm) => {
+  const handleGuardarEdicion = async (id: string, datos: DatosRegistroForm) => {
     setEnviando(true);
-    setRegistros((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              apartamento: datos.apartamento,
-              nombre: datos.nombre,
-              apellido: datos.apellido,
-              numeroSerie: datos.numeroSerie || undefined,
-              tipo: datos.tipo,
-              estadoPago: datos.estadoPago,
-              monto: datos.monto ? Number(datos.monto) : undefined,
-            }
-          : r
-      )
-    );
-    setEnviando(false);
-    setModalEstado(null);
+    try {
+      await actualizarControlTagEnDB(id, {
+        apartamento: datos.apartamento,
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        numeroSerie: datos.numeroSerie || undefined,
+        tipo: datos.tipo,
+        estadoPago: datos.estadoPago,
+        monto: datos.monto ? Number(datos.monto) : undefined,
+      });
+      await recargarRegistros();
+      setModalEstado(null);
+    } catch (err) {
+      console.error("Error al editar el registro de control/tag:", err);
+      window.alert("No se pudieron guardar los cambios. Intentá de nuevo.");
+    } finally {
+      setEnviando(false);
+    }
   };
 
-  const handleEliminar = (registro: RegistroControlTag) => {
+  const handleEliminar = async (registro: RegistroControlTag) => {
     const confirmado = window.confirm(
       `¿Seguro que querés eliminar el ${TIPO_LABEL[registro.tipo].toLowerCase()} de ${registro.nombre} ${registro.apellido} (depto ${registro.apartamento})?`
     );
     if (!confirmado) return;
-    setRegistros((prev) => prev.filter((r) => r.id !== registro.id));
+
+    try {
+      await eliminarControlTagEnDB(registro.id);
+      await recargarRegistros();
+    } catch (err) {
+      console.error("Error al eliminar el registro de control/tag:", err);
+      window.alert("No se pudo eliminar el registro. Intentá de nuevo.");
+    }
   };
 
   const query = normalizar(busqueda.trim());
@@ -680,7 +706,11 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       </div>
 
       <div className="flex w-full max-w-2xl flex-col gap-2">
-        {listaOrdenada.length === 0 ? (
+        {cargando ? (
+          <p className="text-center text-gray-400">Cargando registros…</p>
+        ) : errorCarga ? (
+          <p className="text-center text-red-400">{errorCarga}</p>
+        ) : listaOrdenada.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/10 py-16 text-center text-gray-500">
             <TagIcon size={28} />
             <p className="text-sm">
