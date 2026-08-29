@@ -5,12 +5,14 @@ import { obtenerFacturasDeDB, actualizarFacturaEnDB } from "../lib/firebase";
 
 // --------------------------------------------------------------------
 // CONFIGURACIÓN DE FACTURACIÓN — único lugar a tocar cuando llegue el
-// RUT definitivo, el CAE de DGI, o si cambia el prefijo de serie.
-// El logo se toma del mismo archivo que ya usa el resto de la app.
+// RUT definitivo, el CAE de DGI, la dirección/contacto real del edificio,
+// o si cambia el prefijo de serie.
 // --------------------------------------------------------------------
 export const CONFIG_FACTURA = {
   nombreEmisor: "Torre Antares",
   rut: "RUT PROVISORIO — PENDIENTE DE CONFIRMAR",
+  direccion: "[Dirección del edificio — completar]",
+  contacto: "[Teléfono / email — completar]",
   prefijoSerie: "A",
   numeroCAE: "", // se completa cuando DGI habilite el CAE real
   logo,
@@ -27,7 +29,9 @@ export interface Factura {
   concepto: string;
   importe: number;
   reservaId: string;
-  estado: "nueva" | "vista";
+  estado: "nueva" | "vista"; // controla el color de la card (no confundir con "pagado")
+  pagado: boolean;
+  formaPago?: string; // "Efectivo", "Transferencia", etc.
   autor: string;
   fechaCreacion: string; // ISO
 }
@@ -50,7 +54,7 @@ function formatearImporte(valor: number) {
   return valor.toLocaleString("es-UY", {
     style: "currency",
     currency: "UYU",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   });
 }
 
@@ -66,117 +70,124 @@ function formatearFecha(fecha: string) {
 /* ---------------------------------------------------------- */
 /* Preview / documento imprimible de la factura                 */
 /* ---------------------------------------------------------- */
+// Todo acá adentro usa estilos inline (style={{...}}), nunca clases de
+// Tailwind. html2canvas (la librería que captura este bloque para armar
+// el PDF) no sabe leer los colores que genera Tailwind v4 (oklch/color()),
+// así que cualquier clase de color acá rompe la descarga. Ver conversación
+// previa si hace falta agregar algo nuevo — siempre en style, nunca className
+// para colores/bordes.
+
+function Fila({ izquierda, derecha }: { izquierda: React.ReactNode; derecha?: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <span>{izquierda}</span>
+      <span>{derecha}</span>
+    </div>
+  );
+}
 
 function FacturaDocumento({ factura }: { factura: Factura }) {
-  const esProvisoria = !CONFIG_FACTURA.numeroCAE;
+  const estiloSeccionTitulo: React.CSSProperties = {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    color: "#374151",
+    margin: 0,
+  };
+
+  const estiloDivider: React.CSSProperties = {
+    borderTop: "1px solid #1a1a1a",
+    margin: "0",
+  };
 
   return (
-    <div style={{ width: "100%", backgroundColor: "#ffffff", padding: "32px", color: "#1a1a1a" }}>
-      {esProvisoria && (
-        <div
-          style={{
-            marginBottom: "16px",
-            borderRadius: "6px",
-            border: "1px solid #fbbf24",
-            backgroundColor: "#fffbeb",
-            padding: "8px 12px",
-            textAlign: "center",
-            fontSize: "12px",
-            fontWeight: 500,
-            color: "#b45309",
-          }}
-        >
-          Comprobante provisorio — pendiente de autorización DGI (CAE)
-        </div>
-      )}
-
-      <div
-        style={{
-          marginBottom: "24px",
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          borderBottom: "1px solid #e5e7eb",
-          paddingBottom: "16px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <img
-            src={CONFIG_FACTURA.logo.src ?? CONFIG_FACTURA.logo}
-            alt=""
-            style={{ height: "48px", width: "48px", objectFit: "contain", filter: "invert(1)" }}
-          />
-          <div>
-            <p style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>{CONFIG_FACTURA.nombreEmisor}</p>
-            <p style={{ fontSize: "12px", color: "#6b7280", margin: 0 }}>{CONFIG_FACTURA.rut}</p>
-          </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <p style={{ fontSize: "14px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#6b7280", margin: 0 }}>
-            Factura
-          </p>
-          <p style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>{factura.numero}</p>
-          {CONFIG_FACTURA.numeroCAE && (
-            <p style={{ fontSize: "10px", color: "#9ca3af", margin: 0 }}>CAE: {CONFIG_FACTURA.numeroCAE}</p>
-          )}
-        </div>
+    <div
+      style={{
+        width: "100%",
+        backgroundColor: "#ffffff",
+        color: "#1a1a1a",
+        border: "1px solid #1a1a1a",
+        fontFamily: "inherit",
+        fontSize: "13px",
+      }}
+    >
+      {/* Encabezado */}
+      <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "3px" }}>
+        <Fila
+          izquierda={
+            <span style={{ fontSize: "18px", fontWeight: 700, display: "flex", alignItems: "center", gap: "8px" }}>
+              <img
+                src={CONFIG_FACTURA.logo.src ?? CONFIG_FACTURA.logo}
+                alt=""
+                style={{ height: "26px", width: "26px", objectFit: "contain", filter: "invert(1)" }}
+              />
+              {CONFIG_FACTURA.nombreEmisor.toUpperCase()}
+            </span>
+          }
+          derecha={<span style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "0.05em" }}>COMPROBANTE</span>}
+        />
+        <Fila
+          izquierda={<span>RUT {CONFIG_FACTURA.rut}</span>}
+          derecha={<span>N.º {factura.numero}</span>}
+        />
+        <Fila izquierda={<span style={{ color: "#4b5563" }}>{CONFIG_FACTURA.direccion}</span>} />
+        <Fila
+          izquierda={<span style={{ color: "#4b5563" }}>{CONFIG_FACTURA.contacto}</span>}
+          derecha={<span>{formatearFecha(factura.fecha)}</span>}
+        />
       </div>
 
-      <div style={{ marginBottom: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "14px" }}>
-        <div>
-          <p style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#9ca3af", margin: 0 }}>
-            Cliente
-          </p>
-          <p style={{ fontWeight: 500, margin: "2px 0" }}>{factura.nombreCliente}</p>
-          <p style={{ color: "#6b7280", margin: 0 }}>Unidad {factura.unidad}</p>
-          {factura.emailCliente && <p style={{ color: "#6b7280", margin: 0 }}>{factura.emailCliente}</p>}
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <p style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#9ca3af", margin: 0 }}>
-            Fecha
-          </p>
-          <p style={{ fontWeight: 500, margin: "2px 0" }}>{formatearFecha(factura.fecha)}</p>
-        </div>
+      <div style={estiloDivider} />
+
+      {/* Cliente */}
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "4px" }}>
+        <p style={estiloSeccionTitulo}>CLIENTE</p>
+        <div style={{ height: "4px" }} />
+        <p style={{ margin: 0 }}>Nombre: {factura.nombreCliente}</p>
+        <p style={{ margin: 0 }}>Apartamento: {factura.unidad}</p>
       </div>
 
-      <table style={{ marginBottom: "24px", width: "100%", fontSize: "14px", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid #d1d5db", textAlign: "left", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#9ca3af" }}>
-            <th style={{ paddingBottom: "8px", paddingTop: "8px", fontWeight: 600 }}>Concepto</th>
-            <th style={{ paddingBottom: "8px", paddingTop: "8px", textAlign: "right", fontWeight: 600 }}>Importe</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr style={{ borderBottom: "1px solid #f3f4f6" }}>
-            <td style={{ paddingTop: "12px", paddingBottom: "12px" }}>{factura.concepto}</td>
-            <td style={{ paddingTop: "12px", paddingBottom: "12px", textAlign: "right" }}>
-              {formatearImporte(factura.importe)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div style={estiloDivider} />
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <div style={{ width: "192px" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              borderTop: "1px solid #d1d5db",
-              paddingTop: "8px",
-              fontSize: "16px",
-              fontWeight: 700,
-            }}
-          >
-            <span>Total</span>
-            <span>{formatearImporte(factura.importe)}</span>
-          </div>
-        </div>
+      {/* Detalle */}
+      <div style={{ padding: "16px 20px" }}>
+        <p style={{ ...estiloSeccionTitulo, marginBottom: "10px" }}>DETALLE</p>
+        <Fila
+          izquierda={<span style={{ fontWeight: 600 }}>Concepto</span>}
+          derecha={<span style={{ fontWeight: 600 }}>Importe</span>}
+        />
+        <div style={{ borderTop: "1px solid #9ca3af", margin: "6px 0 10px 0" }} />
+        <Fila izquierda={<span>{factura.concepto}</span>} derecha={<span>{formatearImporte(factura.importe)}</span>} />
       </div>
 
-      <p style={{ marginTop: "32px", textAlign: "center", fontSize: "10px", color: "#9ca3af" }}>
-        Emitido por {factura.autor} · {CONFIG_FACTURA.nombreEmisor}
-      </p>
+      <div style={estiloDivider} />
+
+      {/* Total + estado de pago */}
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "6px" }}>
+        <Fila
+          izquierda={<span />}
+          derecha={
+            <span style={{ fontSize: "16px", fontWeight: 700 }}>
+              TOTAL&nbsp;&nbsp;{formatearImporte(factura.importe)}
+            </span>
+          }
+        />
+        <div style={{ height: "4px" }} />
+        <p style={{ margin: 0 }}>
+          Estado: <strong>{factura.pagado ? "PAGADO" : "PENDIENTE"}</strong>
+        </p>
+        {factura.pagado && factura.formaPago && (
+          <p style={{ margin: 0 }}>Forma de pago: {factura.formaPago}</p>
+        )}
+      </div>
+
+      <div style={estiloDivider} />
+
+      {/* Pie */}
+      <div style={{ padding: "14px 20px", textAlign: "center", fontSize: "11px", color: "#6b7280" }}>
+        Comprobante administrativo generado por el sistema de administración de{" "}
+        {CONFIG_FACTURA.nombreEmisor}.
+      </div>
     </div>
   );
 }
@@ -204,7 +215,11 @@ function FacturaModal({
         import("jspdf"),
       ]);
 
-      const canvas = await html2canvas(contenidoRef.current, { scale: 2, backgroundColor: "#ffffff" });
+      const canvas = await html2canvas(contenidoRef.current, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+      });
       const imgData = canvas.toDataURL("image/png");
 
       const pdf = new jsPDF({ unit: "mm", format: "a4" });

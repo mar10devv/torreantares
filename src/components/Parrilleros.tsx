@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import DayGrillModal, { PRECIOS } from "./DayGrillModal";
 import type { ReservaParrillero, Turno, Ubicacion } from "./DayGrillModal";
 import { CONFIG_FACTURA } from "./Facturas";
+import type { Factura } from "./Facturas";
 import {
   crearReservaParrilleroEnDB,
   obtenerReservasParrilleroDeDB,
@@ -10,6 +11,8 @@ import {
   crearNotaEnDB,
   crearFacturaEnDB,
   generarProximoNumeroFacturaEnDB,
+  obtenerFacturasDeDB,
+  actualizarFacturaEnDB,
 } from "../lib/firebase";
 
 interface Usuario {
@@ -142,6 +145,8 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
           importe: PRECIOS[ubicacion],
           reservaId,
           estado: "nueva",
+          pagado,
+          formaPago: pagado ? "Efectivo" : undefined,
           autor: usuario.nombre,
           fechaCreacion: new Date().toISOString(),
         });
@@ -158,9 +163,30 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
     const reserva = reservas.find((r) => r.id === id);
     if (!reserva) return;
 
+    const nuevoPagado = !reserva.pagado;
+
     try {
-      await actualizarReservaParrilleroEnDB(id, { pagado: !reserva.pagado });
+      await actualizarReservaParrilleroEnDB(id, { pagado: nuevoPagado });
       await cargarReservas();
+
+      // La factura vinculada a esta reserva puede haber quedado "pendiente"
+      // si se cobró después de generarse (ej: se reservó sin pagar y se
+      // marcó como pagado más tarde). Se sincroniza acá para que el PDF
+      // siempre refleje el estado real de la reserva.
+      try {
+        const facturas = await obtenerFacturasDeDB();
+        const facturaVinculada = (facturas as unknown as Factura[]).find(
+          (f) => f.reservaId === id
+        );
+        if (facturaVinculada) {
+          await actualizarFacturaEnDB(facturaVinculada.id, {
+            pagado: nuevoPagado,
+            formaPago: nuevoPagado ? "Efectivo" : undefined,
+          });
+        }
+      } catch (errFactura) {
+        console.error("Error al sincronizar el estado de pago de la factura:", errFactura);
+      }
     } catch (err) {
       console.error("Error al actualizar el pago en Firestore:", err);
       setErrorReservas("No se pudo actualizar el pago. Intentá de nuevo.");
