@@ -2,11 +2,14 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import DayGrillModal, { PRECIOS } from "./DayGrillModal";
 import type { ReservaParrillero, Turno, Ubicacion } from "./DayGrillModal";
+import { CONFIG_FACTURA } from "./Facturas";
 import {
   crearReservaParrilleroEnDB,
   obtenerReservasParrilleroDeDB,
   actualizarReservaParrilleroEnDB,
   crearNotaEnDB,
+  crearFacturaEnDB,
+  generarProximoNumeroFacturaEnDB,
 } from "../lib/firebase";
 
 interface Usuario {
@@ -44,6 +47,17 @@ function esPasado(anio: number, mes: number, dia: number) {
   hoy.setHours(0, 0, 0, 0);
   const fecha = new Date(anio, mes, dia);
   return fecha < hoy;
+}
+
+// Arma el título de la card de Facturas.tsx: "Fac. Parrillero (30/08/2026)".
+function formatearTituloFactura(fechaISO: string) {
+  const [anio, mes, dia] = fechaISO.split("-").map(Number);
+  const fecha = new Date(anio, mes - 1, dia);
+  return `Fac. Parrillero (${fecha.toLocaleDateString("es-UY", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })})`;
 }
 
 export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosProps) {
@@ -106,8 +120,34 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
     };
 
     try {
-      await crearReservaParrilleroEnDB(nuevaReserva);
+      const reservaId = await crearReservaParrilleroEnDB(nuevaReserva);
       await cargarReservas();
+
+      // Factura provisoria automática, vinculada a la reserva recién creada.
+      // Va en su propio try/catch: si esto falla, la reserva ya se guardó
+      // bien y no queremos que el usuario vea un error de "no se pudo
+      // reservar" cuando en realidad la reserva sí se hizo.
+      try {
+        const numero = await generarProximoNumeroFacturaEnDB();
+        await crearFacturaEnDB({
+          numero: `${CONFIG_FACTURA.prefijoSerie}${String(numero).padStart(4, "0")}`,
+          titulo: formatearTituloFactura(diaSeleccionado),
+          fecha: diaSeleccionado,
+          unidad,
+          nombreCliente,
+          emailCliente,
+          concepto: `Uso de parrillero ${parrillero} · ${
+            ubicacion === "interior" ? "Adentro" : "Afuera"
+          } · Turno ${turno === "mediodia" ? "día" : "noche"}`,
+          importe: PRECIOS[ubicacion],
+          reservaId,
+          estado: "nueva",
+          autor: usuario.nombre,
+          fechaCreacion: new Date().toISOString(),
+        });
+      } catch (errFactura) {
+        console.error("Error al crear la factura provisoria en Firestore:", errFactura);
+      }
     } catch (err) {
       console.error("Error al crear reserva en Firestore:", err);
       setErrorReservas("No se pudo crear la reserva. Intentá de nuevo.");

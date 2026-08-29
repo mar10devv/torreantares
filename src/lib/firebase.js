@@ -12,6 +12,7 @@ import {
   query,
   where,
   orderBy,
+  runTransaction,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -372,4 +373,83 @@ export async function actualizarResidenteEnDB(residenteId, cambios) {
 // Elimina un residente
 export async function eliminarResidenteEnDB(residenteId) {
   await deleteDoc(doc(db, "residentes", residenteId));
+}
+
+/* ---------------------------------------------------------- */
+/* Controles / Tags                                             */
+/* ---------------------------------------------------------- */
+// Registro de controles y tags vendidos por depto (ControlTag.tsx). Mismo
+// patrón que "residentes": antes vivía en memoria (useState), ahora en
+// Firestore para que todas las PCs vean lo mismo.
+
+// Crea un registro de control/tag nuevo en la colección "controlesTags"
+export async function crearControlTagEnDB(registro) {
+  const docRef = await addDoc(collection(db, "controlesTags"), limpiarUndefined(registro));
+  return docRef.id;
+}
+
+// Trae todos los registros de la colección "controlesTags"
+export async function obtenerControlesTagsDeDB() {
+  const snapshot = await getDocs(collection(db, "controlesTags"));
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de un registro existente (editar datos,
+// togglear estado de pago, etc.)
+export async function actualizarControlTagEnDB(registroId, cambios) {
+  const registroRef = doc(db, "controlesTags", registroId);
+  await updateDoc(registroRef, limpiarUndefined(cambios));
+}
+
+// Elimina un registro de control/tag
+export async function eliminarControlTagEnDB(registroId) {
+  await deleteDoc(doc(db, "controlesTags", registroId));
+}
+
+/* ---------------------------------------------------------- */
+/* Facturas                                                      */
+/* ---------------------------------------------------------- */
+// Cada factura queda vinculada a la reserva de parrillero que la generó
+// (reservaId). La numeración (ej. "A0001") se genera con una transacción
+// atómica sobre un documento contador aparte, para que dos reservas
+// creadas casi al mismo tiempo nunca terminen con el mismo número.
+
+// Genera el próximo número de factura de forma atómica (evita duplicados
+// con alta concurrencia). Devuelve solo el entero — el formato "A0001" se
+// arma en Facturas.tsx combinándolo con CONFIG_FACTURA.prefijoSerie.
+export async function generarProximoNumeroFacturaEnDB() {
+  const contadorRef = doc(db, "contadores", "facturas");
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(contadorRef);
+    const actual = snap.exists() ? snap.data().ultimoNumero : 0;
+    const siguiente = actual + 1;
+    transaction.set(contadorRef, { ultimoNumero: siguiente }, { merge: true });
+    return siguiente;
+  });
+}
+
+// Crea una factura nueva en la colección "facturas"
+export async function crearFacturaEnDB(factura) {
+  const docRef = await addDoc(collection(db, "facturas"), limpiarUndefined(factura));
+  return docRef.id;
+}
+
+// Trae todas las facturas, ordenadas de más nueva a más vieja
+export async function obtenerFacturasDeDB() {
+  const q = query(collection(db, "facturas"), orderBy("fechaCreacion", "desc"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de una factura existente (marcarla como
+// "vista" al abrirla, completar numeroCAE cuando llegue de DGI, etc.)
+export async function actualizarFacturaEnDB(facturaId, cambios) {
+  const facturaRef = doc(db, "facturas", facturaId);
+  await updateDoc(facturaRef, limpiarUndefined(cambios));
 }

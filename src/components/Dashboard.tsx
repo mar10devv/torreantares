@@ -14,6 +14,7 @@ import {
   CircleDollarSign,
   X,
   CircleHelp,
+  Tag,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import type { Ingreso } from "./Ingresos";
@@ -36,7 +37,7 @@ interface DashboardProps {
   onListo?: () => void;
 }
 
-type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo" | "gray";
+type Color = "blue" | "orange" | "emerald" | "cyan" | "yellow" | "fuchsia" | "slate" | "indigo" | "gray" | "red";
 
 // IMPORTANTE — por qué acá no usamos from-blue-500/to-blue-700 ni bg-blue-500/15:
 // Tailwind v4 compila esas clases con color-mix(in oklab, ...) por debajo,
@@ -113,6 +114,13 @@ const COLOR_CLASSES: Record<
     gradiente: "bg-[linear-gradient(135deg,#737373,#404040)]",
     glow: "shadow-[0_0_30px_-10px_rgba(115,115,115,0.5)]",
   },
+  red: {
+    bg: "bg-[rgba(239,68,68,0.15)]",
+    text: "text-red-400",
+    border: "hover:border-[rgba(239,68,68,0.3)]",
+    gradiente: "bg-[linear-gradient(135deg,#ef4444,#b91c1c)]",
+    glow: "shadow-[0_0_30px_-10px_rgba(239,68,68,0.5)]",
+  },
 };
 
 const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; color: Color }[] = [
@@ -123,6 +131,7 @@ const modulos: { nombre: string; subtitulo?: string; icon: typeof StickyNote; co
   { nombre: "Cocheras", subtitulo: "Registro de vehículos", icon: Car, color: "cyan" },
   { nombre: "UTE", icon: Zap, color: "yellow" },
   { nombre: "Contactos", subtitulo: "Reclamos / Empleados", icon: Users, color: "fuchsia" },
+  { nombre: "Controles/Tag", icon: Tag, color: "red" },
   { nombre: "Administración", icon: Settings, color: "slate" },
   { nombre: "Soporte", subtitulo: "Soporte e información", icon: CircleHelp, color: "gray" },
 ];
@@ -329,7 +338,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
   // Módulos que todavía no están listos para usarse: en vez de navegar,
   // se muestra un aviso. Para volver a habilitar uno, alcanza con
   // sacarlo de este set.
-  const MODULOS_NO_DISPONIBLES = new Set(["Administración"]);
+  const MODULOS_NO_DISPONIBLES = new Set<string>([]);
 
   const handleClickModulo = (nombre: string) => {
     if (nombre === "Soporte") {

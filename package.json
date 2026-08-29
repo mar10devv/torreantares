@@ -22,6 +22,8 @@
     "astro": "^7.1.0",
     "clsx": "^2.1.1",
     "firebase": "^12.17.1",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -43,7 +45,9 @@
       "build/icon.ico"
     ],
     "win": {
-      "target": ["zip"],
+      "target": [
+        "zip"
+      ],
       "icon": "build/icon.ico"
     }
   }

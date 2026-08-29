@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Beef, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Beef, ShieldAlert, Receipt } from "lucide-react";
 import Penalizaciones from "./Penalizaciones";
 import CobrarParrilleros from "./CobrarParrilleros";
+import Facturas from "./Facturas";
 import logo from "../assets/logo.png";
 
 interface Usuario {
@@ -18,11 +19,12 @@ interface AdministracionProps {
   onListo?: () => void;
 }
 
-type Color = "amber" | "red";
+type Color = "amber" | "red" | "blue";
 
 const COLOR_CLASSES: Record<Color, { bg: string; text: string; border: string }> = {
   amber: { bg: "bg-amber-500/15", text: "text-amber-400", border: "hover:border-amber-500/30" },
   red: { bg: "bg-red-500/15", text: "text-red-400", border: "hover:border-red-500/30" },
+  blue: { bg: "bg-blue-500/15", text: "text-blue-400", border: "hover:border-blue-500/30" },
 };
 
 // 🔽 Acá se van sumando más secciones a medida que las armemos
@@ -30,10 +32,11 @@ const COLOR_CLASSES: Record<Color, { bg: string; text: string; border: string }>
 const secciones: { nombre: string; icon: typeof Beef; color: Color }[] = [
   { nombre: "Cobrar Parrilleros", icon: Beef, color: "amber" },
   { nombre: "Penalizaciones", icon: ShieldAlert, color: "red" },
+  { nombre: "Facturas", icon: Receipt, color: "blue" },
 ];
 
 export default function Administracion({ usuario, onVolver, onListo }: AdministracionProps) {
-  const [subvista, setSubvista] = useState<"menu" | "cobrar-parrilleros" | "penalizaciones">("menu");
+  const [subvista, setSubvista] = useState<"menu" | "cobrar-parrilleros" | "penalizaciones" | "facturas">("menu");
   const [modalCobrarAbierto, setModalCobrarAbierto] = useState(false);
 
   useEffect(() => {
@@ -58,6 +61,8 @@ export default function Administracion({ usuario, onVolver, onListo }: Administr
       setSubvista("penalizaciones");
     } else if (nombre === "Cobrar Parrilleros") {
       setModalCobrarAbierto(true);
+    } else if (nombre === "Facturas") {
+      setSubvista("facturas");
     } else {
       console.log(`Sección "${nombre}" todavía no implementada`);
     }
@@ -68,6 +73,10 @@ export default function Administracion({ usuario, onVolver, onListo }: Administr
   // no una consulta real.
   if (subvista === "penalizaciones") {
     return <Penalizaciones usuario={usuario} onVolver={() => setSubvista("menu")} />;
+  }
+
+  if (subvista === "facturas") {
+    return <Facturas usuario={usuario} onVolver={() => setSubvista("menu")} />;
   }
 
   return (

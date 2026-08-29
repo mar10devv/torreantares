@@ -23,6 +23,7 @@ const Ute = lazy(() => import("./Ute"));
 const Administracion = lazy(() => import("./Administracion"));
 const Contactos = lazy(() => import("./Contactos"));
 const PropietariosInquilinos = lazy(() => import("./PropietariosInquilinos"));
+const ControlTag = lazy(() => import("./ControlTag"));
 
 interface Usuario {
   nombre: string;
@@ -41,7 +42,8 @@ type Vista =
   | "ute"
   | "administracion"
   | "contactos"
-  | "residentes"; // Propietarios/Inquilinos — acá se van sumando el resto
+  | "residentes" // Propietarios/Inquilinos — acá se van sumando el resto
+  | "controlTag"; // Controles/Tag
 
 const SESION_KEY = "torreantares_sesion";
 
@@ -60,6 +62,7 @@ const VISTA_A_PATH: Record<Vista, string> = {
   administracion: "/administracion",
   contactos: "/contactos",
   residentes: "/propietarios-inquilinos",
+  controlTag: "/controles-tag",
 };
 
 const PATH_A_VISTA: Partial<Record<string, Vista>> = Object.fromEntries(
@@ -290,6 +293,9 @@ export default function Home() {
     } else if (modulo === "Contactos") {
       iniciarCarga("Cargando contactos…");
       setVista("contactos");
+    } else if (modulo === "Controles/Tag") {
+      iniciarCarga("Cargando controles/tags…");
+      setVista("controlTag");
     } else {
       // 🔽 Acá luego sumamos el resto
       console.log(`Módulo "${modulo}" todavía no implementado`);
@@ -350,6 +356,8 @@ export default function Home() {
             <Administracion usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
           ) : vista === "contactos" ? (
             <Contactos usuario={usuarioActivo} usuarios={usuarios} onVolver={handleVolverAlDashboard} onListo={handleListo} />
+          ) : vista === "controlTag" ? (
+            <ControlTag usuario={usuarioActivo} onVolver={handleVolverAlDashboard} onListo={handleListo} />
           ) : (
             <Dashboard
               usuario={usuarioActivo}
