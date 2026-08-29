@@ -245,6 +245,26 @@ export async function eliminarVehiculoEnDB(vehiculoId) {
   await deleteDoc(doc(db, "vehiculos", vehiculoId));
 }
 
+// Elimina TODOS los vehículos asociados a un residente que se está dando de
+// baja (propietario/inquilino eliminado). Matchea primero por residenteId
+// (forma confiable, para vehículos cargados de ahora en más); como respaldo,
+// para vehículos viejos que se crearon antes de guardar ese vínculo, matchea
+// por apartamento + nombre + apellido. Devuelve cuántos vehículos borró.
+export async function eliminarVehiculosDeResidenteEnDB({ residenteId, apartamento, nombre, apellido }) {
+  const snapshot = await getDocs(collection(db, "vehiculos"));
+  const aEliminar = snapshot.docs.filter((d) => {
+    const v = d.data();
+    if (residenteId && v.residenteId === residenteId) return true;
+    if (!v.residenteId && v.apartamento === apartamento && v.nombre === nombre && v.apellido === apellido) {
+      return true;
+    }
+    return false;
+  });
+
+  await Promise.all(aEliminar.map((d) => deleteDoc(doc(db, "vehiculos", d.id))));
+  return aEliminar.length;
+}
+
 // Crea un ingreso nuevo en la colección "ingresos"
 export async function crearIngresoEnDB(ingreso) {
   const docRef = await addDoc(collection(db, "ingresos"), limpiarUndefined(ingreso));

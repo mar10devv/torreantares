@@ -25,6 +25,7 @@ import {
   actualizarResidenteEnDB,
   eliminarResidenteEnDB,
   crearVehiculoEnDB,
+  eliminarVehiculosDeResidenteEnDB,
 } from "../lib/firebase";
 
 interface Usuario {
@@ -565,8 +566,10 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
   // Si el formulario venía con datos de vehículo, lo crea en la colección
   // de Cocheras/vehículos reusando nombre, apellido, depto, teléfono y
   // correo del residente recién cargado — así no hay que volver a tipearlos
-  // en el módulo de Cocheras.
-  const crearVehiculoSiCorresponde = async (datos: DatosResidenteForm) => {
+  // en el módulo de Cocheras. Se le pasa también el residenteId ya generado
+  // para que el vehículo quede vinculado y se pueda borrar en cascada si el
+  // residente se elimina más adelante.
+  const crearVehiculoSiCorresponde = async (datos: DatosResidenteForm, residenteId: string) => {
     if (!datos.vehiculo) return;
 
     try {
@@ -580,6 +583,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         apartamento: datos.apartamento,
         telefono: datos.telefono,
         correo: datos.email,
+        residenteId,
         autor: usuario.nombre,
         fechaCreacion: new Date().toISOString(),
       });
@@ -596,7 +600,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
   const handleGuardarNuevo = async (datos: DatosResidenteForm) => {
     try {
       setEnviando(true);
-      await crearResidenteEnDB({
+      const nuevoId = await crearResidenteEnDB({
         apartamento: datos.apartamento,
         tipo: datos.tipo,
         nombre: datos.nombre,
@@ -607,7 +611,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         autor: usuario.nombre,
         fechaCreacion: new Date().toISOString(),
       });
-      await crearVehiculoSiCorresponde(datos);
+      await crearVehiculoSiCorresponde(datos, nuevoId);
       await cargarResidentes();
       setModalEstado(null);
     } catch (err) {
@@ -639,13 +643,22 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
     }
   };
 
+  // Al eliminar un propietario/inquilino, se borran primero sus vehículos
+  // registrados en Cocheras (para no dejar autos/motos huérfanos) y recién
+  // después se elimina el residente en sí.
   const handleEliminar = async (residente: Residente) => {
     const confirmado = window.confirm(
-      `¿Seguro que querés eliminar el registro de ${residente.nombre} ${residente.apellido} (depto ${residente.apartamento})?`
+      `¿Seguro que querés eliminar el registro de ${residente.nombre} ${residente.apellido} (depto ${residente.apartamento})? Esto también eliminará sus vehículos registrados en Cocheras.`
     );
     if (!confirmado) return;
 
     try {
+      await eliminarVehiculosDeResidenteEnDB({
+        residenteId: residente.id,
+        apartamento: residente.apartamento,
+        nombre: residente.nombre,
+        apellido: residente.apellido,
+      });
       await eliminarResidenteEnDB(residente.id);
       await cargarResidentes();
     } catch (err) {
