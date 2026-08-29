@@ -13,6 +13,7 @@ import {
   CircleDollarSign,
   Hash,
 } from "lucide-react";
+import { crearNotaEnDB } from "../lib/firebase";
 
 interface Usuario {
   nombre: string;
@@ -36,6 +37,10 @@ export type EstadoPago = "pagado" | "pendiente";
 // patrón a seguir es el mismo que ya usan PropietariosInquilinos.tsx y
 // Cocheras.tsx (crear/obtener/actualizar/eliminar en lib/firebase.js),
 // nada más hay que reemplazar las funciones handle* de abajo.
+//
+// Lo que SÍ está conectado desde ahora es la creación automática de una
+// Nota (vía crearNotaEnDB) cada vez que se registra una venta de
+// control/tag — ver generarContenidoNota() y handleGuardarNuevo().
 export interface RegistroControlTag {
   id: string;
   apartamento: string;
@@ -44,6 +49,7 @@ export interface RegistroControlTag {
   numeroSerie?: string; // opcional — sirve para identificar al dueño si se encuentra un tag/control suelto
   tipo: TipoControlTag;
   estadoPago: EstadoPago;
+  monto?: number; // solo tiene sentido si estadoPago === "pendiente"
   autor: string;
   fechaCreacion: string; // ISO
 }
@@ -65,10 +71,35 @@ function normalizar(texto: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+// Precios de referencia, solo para probar mientras no haya una lista de
+// precios real cargada en algún lado. Se usan para autocompletar el
+// campo "Monto a cobrar" según el tipo elegido — el campo sigue siendo
+// editable a mano si el precio real es otro.
+const MONTO_POR_DEFECTO: Record<TipoControlTag, number> = {
+  control: 650,
+  tag: 450,
+};
+
 function generarId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+// Arma el texto de la nota automática que se publica en "Notas" cada vez
+// que se vende un control o un tag. El depto siempre va primero, como se
+// pidió:
+//   "710 Compro Tag dejo pago y quedo configurado"
+//   "710 Compro Control, quedo pendiente para cobrar $1500"
+function generarContenidoNota(registro: RegistroControlTag): string {
+  const tipoTexto = TIPO_LABEL[registro.tipo]; // "Control" o "Tag"
+
+  if (registro.estadoPago === "pagado") {
+    return `${registro.apartamento} Compro ${tipoTexto} dejo pago y quedo configurado`;
+  }
+
+  const monto = registro.monto ?? 0;
+  return `${registro.apartamento} Compro ${tipoTexto}, quedo pendiente para cobrar $${monto}`;
 }
 
 const inputClass =
@@ -139,6 +170,7 @@ function RegistroCard({
               }`}
             >
               {ESTADO_PAGO_LABEL[registro.estadoPago]}
+              {!esPagado && registro.monto ? ` · $${registro.monto}` : ""}
             </span>
           </div>
 
@@ -203,7 +235,17 @@ interface DatosRegistroForm {
   numeroSerie: string;
   tipo: TipoControlTag;
   estadoPago: EstadoPago;
+  monto: string;
 }
+
+// Los valores iniciales del modal pueden venir de un RegistroControlTag
+// (donde "monto" es number | undefined, tal como se guarda) o de un
+// DatosRegistroForm (donde "monto" es siempre string, tal como lo maneja
+// el formulario). Este tipo acepta ambos casos sin pisar el resto de los
+// campos de Partial<DatosRegistroForm>.
+type ValoresInicialesRegistro = Omit<Partial<DatosRegistroForm>, "monto"> & {
+  monto?: number | string;
+};
 
 function RegistroModal({
   titulo,
@@ -213,7 +255,7 @@ function RegistroModal({
   onGuardar,
 }: {
   titulo: string;
-  valoresIniciales?: Partial<DatosRegistroForm>;
+  valoresIniciales?: ValoresInicialesRegistro;
   enviando?: boolean;
   onClose: () => void;
   onGuardar: (datos: DatosRegistroForm) => void;
@@ -224,12 +266,32 @@ function RegistroModal({
   const [numeroSerie, setNumeroSerie] = useState(valoresIniciales?.numeroSerie ?? "");
   const [tipo, setTipo] = useState<TipoControlTag>(valoresIniciales?.tipo ?? "control");
   const [estadoPago, setEstadoPago] = useState<EstadoPago>(valoresIniciales?.estadoPago ?? "pendiente");
+  const [monto, setMonto] = useState(
+    valoresIniciales?.monto !== undefined
+      ? String(valoresIniciales.monto)
+      : String(MONTO_POR_DEFECTO[tipo])
+  );
+  // Mientras el usuario no toque el campo "Monto" a mano, lo mantenemos
+  // sincronizado con el precio de referencia del tipo elegido. En cuanto
+  // lo edita una vez, dejamos de tocarlo (así no le pisamos un precio
+  // real que haya cargado). Si se está editando un registro existente
+  // que ya tenía un monto guardado, arrancamos directamente como "tocado"
+  // para no sobrescribirlo.
+  const [montoTocado, setMontoTocado] = useState(valoresIniciales?.monto !== undefined);
+
+  useEffect(() => {
+    if (!montoTocado) {
+      setMonto(String(MONTO_POR_DEFECTO[tipo]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipo]);
 
   const handleConfirmar = () => {
     const faltantes: string[] = [];
     if (!apartamento.trim()) faltantes.push("Apartamento");
     if (!nombre.trim()) faltantes.push("Nombre");
     if (!apellido.trim()) faltantes.push("Apellido");
+    if (estadoPago === "pendiente" && !monto.trim()) faltantes.push("Monto a cobrar");
 
     if (faltantes.length > 0) {
       window.alert(`Faltan completar: ${faltantes.join(", ")}`);
@@ -243,6 +305,7 @@ function RegistroModal({
       numeroSerie: numeroSerie.trim(),
       tipo,
       estadoPago,
+      monto: estadoPago === "pendiente" ? monto.trim() : "",
     });
   };
 
@@ -357,6 +420,24 @@ function RegistroModal({
             </button>
           </div>
 
+          {/* Monto a cobrar: solo aplica si quedó pendiente */}
+          {estadoPago === "pendiente" && (
+            <div>
+              <label className={labelClass}>Monto a cobrar</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={monto}
+                onChange={(e) => {
+                  setMonto(e.target.value);
+                  setMontoTocado(true);
+                }}
+                placeholder="Ej: 1500"
+                className={inputClass}
+              />
+            </div>
+          )}
+
           <div className="mt-2 flex gap-2">
             <button
               onClick={onClose}
@@ -437,6 +518,7 @@ function RegistroDetalleModal({
             }`}
           >
             {ESTADO_PAGO_LABEL[registro.estadoPago]}
+            {!esPagado && registro.monto ? ` · $${registro.monto}` : ""}
           </span>
         </div>
 
@@ -476,7 +558,25 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
     onListo?.();
   }, []);
 
-  const handleGuardarNuevo = (datos: DatosRegistroForm) => {
+  // Crea la Nota automática asociada a una venta de control/tag. Si falla
+  // (por ejemplo sin conexión), el registro igual queda guardado en
+  // memoria — solo se avisa que la nota no se pudo publicar, para no
+  // perder la venta por un problema de red.
+  const publicarNotaAutomatica = async (registro: RegistroControlTag) => {
+    try {
+      await crearNotaEnDB({
+        contenido: generarContenidoNota(registro),
+        autor: usuario.nombre,
+      });
+    } catch (err) {
+      console.error("Error al crear la nota automática de Control/Tag:", err);
+      window.alert(
+        "El registro se guardó, pero no se pudo publicar la nota automática en Notas."
+      );
+    }
+  };
+
+  const handleGuardarNuevo = async (datos: DatosRegistroForm) => {
     setEnviando(true);
     const nuevo: RegistroControlTag = {
       id: generarId(),
@@ -486,10 +586,14 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
       numeroSerie: datos.numeroSerie || undefined,
       tipo: datos.tipo,
       estadoPago: datos.estadoPago,
+      monto: datos.monto ? Number(datos.monto) : undefined,
       autor: usuario.nombre,
       fechaCreacion: new Date().toISOString(),
     };
+
     setRegistros((prev) => [...prev, nuevo]);
+    await publicarNotaAutomatica(nuevo);
+
     setEnviando(false);
     setModalEstado(null);
   };
@@ -507,6 +611,7 @@ export default function ControlTag({ usuario, onVolver, onListo }: ControlTagPro
               numeroSerie: datos.numeroSerie || undefined,
               tipo: datos.tipo,
               estadoPago: datos.estadoPago,
+              monto: datos.monto ? Number(datos.monto) : undefined,
             }
           : r
       )
