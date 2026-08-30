@@ -1,7 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, Receipt, Download, X, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Receipt, Download, X, Loader2 } from "lucide-react";
 import logo from "../assets/logo.png";
-import { obtenerFacturasDeDB, actualizarFacturaEnDB } from "../lib/firebase";
+import type { ReservaParrillero } from "./DayGrillModal";
+import { obtenerFinDeUso } from "./DayGrillModal";
+import {
+  obtenerFacturasDeDB,
+  actualizarFacturaEnDB,
+  obtenerReservasParrilleroDeDB,
+  crearFacturaEnDB,
+  generarProximoNumeroFacturaEnDB,
+} from "../lib/firebase";
 
 // --------------------------------------------------------------------
 // CONFIGURACIÓN DE FACTURACIÓN — único lugar a tocar cuando llegue el
@@ -22,7 +30,7 @@ export interface Factura {
   id: string;
   numero: string; // "A0001", "A0002"...
   titulo: string; // "Fac. Parrillero (30/08/2026)"
-  fecha: string; // fecha de uso, YYYY-MM-DD
+  fecha: string; // fecha de USO del parrillero, YYYY-MM-DD — define a qué mes pertenece
   unidad: string;
   nombreCliente: string;
   emailCliente: string;
@@ -33,7 +41,7 @@ export interface Factura {
   pagado: boolean;
   formaPago?: string; // "Efectivo", "Transferencia", etc.
   autor: string;
-  fechaCreacion: string; // ISO
+  fechaCreacion: string; // ISO — cuándo se generó el documento (puede ser horas después de "fecha")
 }
 
 interface Usuario {
@@ -49,6 +57,13 @@ interface FacturasProps {
   onVolver: () => void;
   onListo?: () => void;
 }
+
+const MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+const UNA_HORA_MS = 60 * 60 * 1000;
 
 function formatearImporte(valor: number) {
   return valor.toLocaleString("es-UY", {
@@ -67,15 +82,71 @@ function formatearFecha(fecha: string) {
   });
 }
 
+function formatearTituloFactura(fechaISO: string) {
+  return `Fac. Parrillero (${formatearFecha(fechaISO)})`;
+}
+
+/* ---------------------------------------------------------- */
+/* Reconciliación: genera las facturas que faltan               */
+/* ---------------------------------------------------------- */
+// Se corre cada vez que se abre esta pantalla. Busca reservas de
+// parrillero PAGADAS, NO canceladas, sin factura todavía, cuyo horario
+// real de uso ya terminó hace al menos 1 hora (obtenerFinDeUso contempla
+// que el turno "noche" cruza la medianoche) — y las factura, en orden
+// cronológico. Al esperar a que el uso ya terminó, casi nunca hace falta
+// anular una factura por cancelación tardía, así que la numeración nunca
+// queda con huecos. La fecha impresa en cada factura es siempre la fecha
+// de la reserva, nunca la fecha/hora en que se generó el documento.
+async function generarFacturasPendientes() {
+  const [reservas, facturas] = await Promise.all([
+    obtenerReservasParrilleroDeDB(),
+    obtenerFacturasDeDB(),
+  ]);
+
+  const ahora = new Date();
+  const idsConFactura = new Set((facturas as unknown as Factura[]).map((f) => f.reservaId));
+
+  const pendientes = (reservas as unknown as ReservaParrillero[])
+    .filter((r) => {
+      if (!r.pagado || r.cancelada || idsConFactura.has(r.id)) return false;
+      const finDeUso = obtenerFinDeUso(r.fecha, r.turno);
+      return ahora.getTime() >= finDeUso.getTime() + UNA_HORA_MS;
+    })
+    .sort((a, b) => (a.fecha + a.fechaCreacion).localeCompare(b.fecha + b.fechaCreacion));
+
+  for (const r of pendientes) {
+    const numero = await generarProximoNumeroFacturaEnDB();
+    await crearFacturaEnDB({
+      numero: `${CONFIG_FACTURA.prefijoSerie}${String(numero).padStart(4, "0")}`,
+      titulo: formatearTituloFactura(r.fecha),
+      fecha: r.fecha,
+      unidad: r.unidad,
+      nombreCliente: r.nombreCliente,
+      emailCliente: r.emailCliente,
+      concepto: `Uso de parrillero ${r.parrillero} · ${
+        r.ubicacion === "interior" ? "Adentro" : "Afuera"
+      } · Turno ${r.turno === "mediodia" ? "día" : "noche"}`,
+      importe: r.importe,
+      reservaId: r.id,
+      estado: "nueva",
+      pagado: true,
+      formaPago: "Efectivo",
+      autor: r.autor,
+      fechaCreacion: new Date().toISOString(),
+    });
+  }
+
+  return pendientes.length;
+}
+
 /* ---------------------------------------------------------- */
 /* Preview / documento imprimible de la factura                 */
 /* ---------------------------------------------------------- */
 // Todo acá adentro usa estilos inline (style={{...}}), nunca clases de
 // Tailwind. html2canvas (la librería que captura este bloque para armar
 // el PDF) no sabe leer los colores que genera Tailwind v4 (oklch/color()),
-// así que cualquier clase de color acá rompe la descarga. Ver conversación
-// previa si hace falta agregar algo nuevo — siempre en style, nunca className
-// para colores/bordes.
+// así que cualquier clase de color acá rompe la descarga. Siempre en
+// style, nunca className para colores/bordes.
 
 function Fila({ izquierda, derecha }: { izquierda: React.ReactNode; derecha?: React.ReactNode }) {
   return (
@@ -281,6 +352,10 @@ export default function Facturas({ usuario, onVolver, onListo }: FacturasProps) 
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [facturaAbierta, setFacturaAbierta] = useState<Factura | null>(null);
+  const [mesActual, setMesActual] = useState(() => {
+    const hoy = new Date();
+    return { anio: hoy.getFullYear(), mes: hoy.getMonth() };
+  });
 
   const cargarFacturas = async () => {
     try {
@@ -297,6 +372,11 @@ export default function Facturas({ usuario, onVolver, onListo }: FacturasProps) 
 
   useEffect(() => {
     (async () => {
+      try {
+        await generarFacturasPendientes();
+      } catch (err) {
+        console.error("Error al reconciliar facturas pendientes:", err);
+      }
       await cargarFacturas();
       onListo?.();
     })();
@@ -317,9 +397,22 @@ export default function Facturas({ usuario, onVolver, onListo }: FacturasProps) 
     }
   };
 
+  const cambiarMes = (delta: number) => {
+    setMesActual((prev) => {
+      const nuevaFecha = new Date(prev.anio, prev.mes + delta, 1);
+      return { anio: nuevaFecha.getFullYear(), mes: nuevaFecha.getMonth() };
+    });
+  };
+
+  // Una factura "pertenece" al mes de la fecha de USO del parrillero
+  // (factura.fecha), no al mes en que se generó el documento — así, una
+  // reserva del 31/08 facturada el 01/09 sigue apareciendo en Agosto.
+  const prefijoMes = `${mesActual.anio}-${String(mesActual.mes + 1).padStart(2, "0")}`;
+  const facturasDelMes = facturas.filter((f) => f.fecha.startsWith(prefijoMes));
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-[#0d1117] px-4 py-12 text-white sm:px-6 sm:py-16">
-      <div className="mb-8 flex w-full max-w-3xl items-center justify-between">
+      <div className="mb-6 flex w-full max-w-3xl items-center justify-between">
         <button
           onClick={onVolver}
           className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white transition hover:bg-white/10"
@@ -331,15 +424,35 @@ export default function Facturas({ usuario, onVolver, onListo }: FacturasProps) 
         <div className="w-[92px] sm:w-[104px]" />
       </div>
 
+      <div className="mb-8 flex items-center gap-4">
+        <button
+          onClick={() => cambiarMes(-1)}
+          className="rounded-lg border border-white/10 p-2 transition hover:bg-white/10"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <p className="w-40 text-center text-lg font-semibold capitalize">
+          {MESES[mesActual.mes]} {mesActual.anio}
+        </p>
+        <button
+          onClick={() => cambiarMes(1)}
+          className="rounded-lg border border-white/10 p-2 transition hover:bg-white/10"
+        >
+          <ChevronRight size={18} />
+        </button>
+      </div>
+
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       {cargando ? (
         <p className="text-gray-400">Cargando facturas…</p>
-      ) : facturas.length === 0 ? (
-        <p className="text-gray-500">Todavía no hay facturas generadas.</p>
+      ) : facturasDelMes.length === 0 ? (
+        <p className="text-gray-500">
+          No hay facturas en {MESES[mesActual.mes]} {mesActual.anio}.
+        </p>
       ) : (
         <div className="grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-2">
-          {facturas.map((factura) => {
+          {facturasDelMes.map((factura) => {
             const esNueva = factura.estado === "nueva";
             return (
               <button

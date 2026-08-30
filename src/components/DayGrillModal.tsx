@@ -68,7 +68,7 @@ const TURNOS: { key: Turno; label: string; Icon: typeof Sun }[] = [
   { key: "noche", label: "Noche", Icon: Moon },
 ];
 
-function obtenerTemporada(fecha: string): "verano" | "invierno" {
+export function obtenerTemporada(fecha: string): "verano" | "invierno" {
   const mes = Number(fecha.split("-")[1]);
   return mes === 12 || mes <= 3 ? "verano" : "invierno";
 }
@@ -78,6 +78,26 @@ function obtenerHorario(turno: Turno, temporada: "verano" | "invierno") {
     return temporada === "verano" ? "20:00 - 02:00" : "20:00 - 01:00";
   }
   return temporada === "verano" ? "10:00 - 16:00" : "10:00 - 15:00";
+}
+
+// Devuelve el instante real (Date) en que termina el uso de una reserva.
+// El turno "noche" cruza la medianoche: termina a la 01:00 (invierno) o
+// 02:00 (verano) del día SIGUIENTE al de la reserva — JS Date maneja el
+// desborde de mes/día automáticamente al pasar dia + 1. Se usa desde
+// Facturas.tsx para decidir CUÁNDO generar la factura (fin de uso + 1
+// hora de margen); la fecha que figura impresa en la factura sigue
+// siendo siempre la de la reserva tal cual fue agendada, nunca esta.
+export function obtenerFinDeUso(fecha: string, turno: Turno): Date {
+  const [anio, mes, dia] = fecha.split("-").map(Number);
+  const temporada = obtenerTemporada(fecha);
+
+  if (turno === "noche") {
+    const horaFin = temporada === "verano" ? 2 : 1;
+    return new Date(anio, mes - 1, dia + 1, horaFin, 0, 0);
+  }
+
+  const horaFin = temporada === "verano" ? 16 : 15;
+  return new Date(anio, mes - 1, dia, horaFin, 0, 0);
 }
 
 function hoyISO() {

@@ -12,7 +12,6 @@ import {
   crearFacturaEnDB,
   generarProximoNumeroFacturaEnDB,
   obtenerFacturasDeDB,
-  actualizarFacturaEnDB,
 } from "../lib/firebase";
 
 interface Usuario {
@@ -126,32 +125,33 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
       const reservaId = await crearReservaParrilleroEnDB(nuevaReserva);
       await cargarReservas();
 
-      // Factura provisoria automática, vinculada a la reserva recién creada.
-      // Va en su propio try/catch: si esto falla, la reserva ya se guardó
-      // bien y no queremos que el usuario vea un error de "no se pudo
-      // reservar" cuando en realidad la reserva sí se hizo.
-      try {
-        const numero = await generarProximoNumeroFacturaEnDB();
-        await crearFacturaEnDB({
-          numero: `${CONFIG_FACTURA.prefijoSerie}${String(numero).padStart(4, "0")}`,
-          titulo: formatearTituloFactura(diaSeleccionado),
-          fecha: diaSeleccionado,
-          unidad,
-          nombreCliente,
-          emailCliente,
-          concepto: `Uso de parrillero ${parrillero} · ${
-            ubicacion === "interior" ? "Adentro" : "Afuera"
-          } · Turno ${turno === "mediodia" ? "día" : "noche"}`,
-          importe: PRECIOS[ubicacion],
-          reservaId,
-          estado: "nueva",
-          pagado,
-          formaPago: pagado ? "Efectivo" : undefined,
-          autor: usuario.nombre,
-          fechaCreacion: new Date().toISOString(),
-        });
-      } catch (errFactura) {
-        console.error("Error al crear la factura provisoria en Firestore:", errFactura);
+      // La factura SOLO se genera si la reserva ya nace pagada. Si queda
+      // pendiente de cobro, no se factura nada todavía — se factura recién
+      // cuando efectivamente se cobre (ver handleTogglePagado).
+      if (pagado) {
+        try {
+          const numero = await generarProximoNumeroFacturaEnDB();
+          await crearFacturaEnDB({
+            numero: `${CONFIG_FACTURA.prefijoSerie}${String(numero).padStart(4, "0")}`,
+            titulo: formatearTituloFactura(diaSeleccionado),
+            fecha: diaSeleccionado,
+            unidad,
+            nombreCliente,
+            emailCliente,
+            concepto: `Uso de parrillero ${parrillero} · ${
+              ubicacion === "interior" ? "Adentro" : "Afuera"
+            } · Turno ${turno === "mediodia" ? "día" : "noche"}`,
+            importe: PRECIOS[ubicacion],
+            reservaId,
+            estado: "nueva",
+            pagado: true,
+            formaPago: "Efectivo",
+            autor: usuario.nombre,
+            fechaCreacion: new Date().toISOString(),
+          });
+        } catch (errFactura) {
+          console.error("Error al crear la factura en Firestore:", errFactura);
+        }
       }
     } catch (err) {
       console.error("Error al crear reserva en Firestore:", err);
@@ -169,23 +169,41 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
       await actualizarReservaParrilleroEnDB(id, { pagado: nuevoPagado });
       await cargarReservas();
 
-      // La factura vinculada a esta reserva puede haber quedado "pendiente"
-      // si se cobró después de generarse (ej: se reservó sin pagar y se
-      // marcó como pagado más tarde). Se sincroniza acá para que el PDF
-      // siempre refleje el estado real de la reserva.
-      try {
-        const facturas = await obtenerFacturasDeDB();
-        const facturaVinculada = (facturas as unknown as Factura[]).find(
-          (f) => f.reservaId === id
-        );
-        if (facturaVinculada) {
-          await actualizarFacturaEnDB(facturaVinculada.id, {
-            pagado: nuevoPagado,
-            formaPago: nuevoPagado ? "Efectivo" : undefined,
-          });
+      // Solo generamos factura al pasar de "pendiente" a "pagado". Si se
+      // desmarca (pagado -> pendiente), no se toca ninguna factura
+      // existente: borrarla rompería la numeración correlativa que exige
+      // DGI (quedaría un hueco tipo A0001, A0003 sin A0002).
+      if (nuevoPagado) {
+        try {
+          const facturas = await obtenerFacturasDeDB();
+          const yaTieneFactura = (facturas as unknown as Factura[]).some(
+            (f) => f.reservaId === id
+          );
+
+          if (!yaTieneFactura) {
+            const numero = await generarProximoNumeroFacturaEnDB();
+            await crearFacturaEnDB({
+              numero: `${CONFIG_FACTURA.prefijoSerie}${String(numero).padStart(4, "0")}`,
+              titulo: formatearTituloFactura(reserva.fecha),
+              fecha: reserva.fecha,
+              unidad: reserva.unidad,
+              nombreCliente: reserva.nombreCliente,
+              emailCliente: reserva.emailCliente,
+              concepto: `Uso de parrillero ${reserva.parrillero} · ${
+                reserva.ubicacion === "interior" ? "Adentro" : "Afuera"
+              } · Turno ${reserva.turno === "mediodia" ? "día" : "noche"}`,
+              importe: reserva.importe,
+              reservaId: id,
+              estado: "nueva",
+              pagado: true,
+              formaPago: "Efectivo",
+              autor: usuario.nombre,
+              fechaCreacion: new Date().toISOString(),
+            });
+          }
+        } catch (errFactura) {
+          console.error("Error al crear la factura al marcar como pagado:", errFactura);
         }
-      } catch (errFactura) {
-        console.error("Error al sincronizar el estado de pago de la factura:", errFactura);
       }
     } catch (err) {
       console.error("Error al actualizar el pago en Firestore:", err);
