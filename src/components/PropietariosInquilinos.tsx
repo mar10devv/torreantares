@@ -26,6 +26,9 @@ import {
   eliminarResidenteEnDB,
   crearVehiculoEnDB,
   eliminarVehiculosDeResidenteEnDB,
+  crearContactoEnDB,
+  actualizarContactoEnDB,
+  eliminarContactoEnDB,
 } from "../lib/firebase";
 
 interface Usuario {
@@ -55,6 +58,7 @@ export interface Residente {
   fechaInicio?: string; // YYYY-MM-DD — legado: ya no se pide al cargar, pero se conserva en docs viejos
   activo: boolean; // false = ya no vive ahí (se fue o se vendió el depto)
   fechaFin?: string; // YYYY-MM-DD, cuándo dejó de ser el residente activo
+  contactoId?: string; // id del contacto espejo en la colección "contactos"
   autor: string;
   fechaCreacion: string; // ISO
 }
@@ -611,6 +615,20 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         autor: usuario.nombre,
         fechaCreacion: new Date().toISOString(),
       });
+
+      // Crea el contacto espejo en Contactos y guarda su id en el residente,
+      // para poder editarlo/eliminarlo en cascada más adelante.
+      const contactoId = await crearContactoEnDB({
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        apartamento: datos.apartamento,
+        email: datos.email,
+        telefono: datos.telefono,
+        autor: usuario.nombre,
+        fechaCreacion: new Date().toISOString(),
+      });
+      await actualizarResidenteEnDB(nuevoId, { contactoId });
+
       await crearVehiculoSiCorresponde(datos, nuevoId);
       await cargarResidentes();
       setModalEstado(null);
@@ -622,10 +640,10 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
     }
   };
 
-  const handleGuardarEdicion = async (id: string, datos: DatosResidenteForm) => {
+    const handleGuardarEdicion = async (residente: Residente, datos: DatosResidenteForm) => {
     try {
       setEnviando(true);
-      await actualizarResidenteEnDB(id, {
+      await actualizarResidenteEnDB(residente.id, {
         apartamento: datos.apartamento,
         tipo: datos.tipo,
         nombre: datos.nombre,
@@ -633,6 +651,18 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         telefono: datos.telefono,
         email: datos.email,
       });
+
+      // Mantiene sincronizado el contacto espejo, si existe.
+      if (residente.contactoId) {
+        await actualizarContactoEnDB(residente.contactoId, {
+          nombre: datos.nombre,
+          apellido: datos.apellido,
+          apartamento: datos.apartamento,
+          email: datos.email,
+          telefono: datos.telefono,
+        });
+      }
+
       await cargarResidentes();
       setModalEstado(null);
     } catch (err) {
@@ -646,9 +676,9 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
   // Al eliminar un propietario/inquilino, se borran primero sus vehículos
   // registrados en Cocheras (para no dejar autos/motos huérfanos) y recién
   // después se elimina el residente en sí.
-  const handleEliminar = async (residente: Residente) => {
+   const handleEliminar = async (residente: Residente) => {
     const confirmado = window.confirm(
-      `¿Seguro que querés eliminar el registro de ${residente.nombre} ${residente.apellido} (depto ${residente.apartamento})? Esto también eliminará sus vehículos registrados en Cocheras.`
+      `¿Seguro que querés eliminar el registro de ${residente.nombre} ${residente.apellido} (depto ${residente.apartamento})? Esto también eliminará sus vehículos registrados en Cocheras y su contacto en la agenda.`
     );
     if (!confirmado) return;
 
@@ -659,6 +689,9 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
         nombre: residente.nombre,
         apellido: residente.apellido,
       });
+      if (residente.contactoId) {
+        await eliminarContactoEnDB(residente.contactoId);
+      }
       await eliminarResidenteEnDB(residente.id);
       await cargarResidentes();
     } catch (err) {
@@ -782,7 +815,7 @@ export default function PropietariosInquilinos({ usuario, onVolver, onListo }: P
           valoresIniciales={modalEstado.residente}
           enviando={enviando}
           onClose={() => setModalEstado(null)}
-          onGuardar={(datos) => handleGuardarEdicion(modalEstado.residente.id, datos)}
+          onGuardar={(datos) => handleGuardarEdicion(modalEstado.residente, datos)}
         />
       )}
 
