@@ -450,6 +450,7 @@ export default function Dashboard({ usuario, onVolver, onNavigate, onListo }: Da
           backgroundImage: `url(${logo.src})`,
           backgroundSize: "42%",
           filter: "drop-shadow(0 0 70px rgba(255,255,255,0.3))",
+          backgroundPosition: "center 95%",
         }}
       />
       <div

@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Beef, ShieldAlert, Receipt } from "lucide-react";
+import { ArrowLeft, Beef, ShieldAlert, Receipt, ChevronRight } from "lucide-react";
 import Penalizaciones from "./Penalizaciones";
 import CobrarParrilleros from "./CobrarParrilleros";
 import Facturas from "./Facturas";
-import logo from "../assets/logo.png";
 
 interface Usuario {
   nombre: string;
@@ -21,10 +20,15 @@ interface AdministracionProps {
 
 type Color = "amber" | "red" | "blue";
 
-const COLOR_CLASSES: Record<Color, { bg: string; text: string; border: string }> = {
-  amber: { bg: "bg-amber-500/15", text: "text-amber-400", border: "hover:border-amber-500/30" },
-  red: { bg: "bg-red-500/15", text: "text-red-400", border: "hover:border-red-500/30" },
-  blue: { bg: "bg-blue-500/15", text: "text-blue-400", border: "hover:border-blue-500/30" },
+interface ColorClases {
+  bg: string;
+  text: string;
+}
+
+const COLOR_CLASSES: Record<Color, ColorClases> = {
+  amber: { bg: "bg-amber-500/15", text: "text-amber-400" },
+  red: { bg: "bg-red-500/15", text: "text-red-400" },
+  blue: { bg: "bg-blue-500/15", text: "text-blue-400" },
 };
 
 // 🔽 Acá se van sumando más secciones a medida que las armemos
@@ -80,58 +84,41 @@ export default function Administracion({ usuario, onVolver, onListo }: Administr
   }
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center overflow-hidden bg-[#0d1117] px-6 py-16 text-white">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-center bg-no-repeat opacity-45"
-        style={{
-          backgroundImage: `url(${logo.src})`,
-          backgroundSize: "42%",
-          filter: "drop-shadow(0 0 55px rgba(255,255,255,0.45)) drop-shadow(0 0 110px rgba(255,255,255,0.2))",
-        }}
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[#0d1117]/8 backdrop-blur-sm"
-      />
+    <main className="flex min-h-screen flex-col items-center bg-[#0d1117] px-6 py-16 text-white">
+      <div className="mb-6 flex w-full max-w-2xl items-center justify-between">
+        <button
+          onClick={onVolver}
+          className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white transition hover:bg-white/10"
+        >
+          <ArrowLeft size={18} />
+          Volver
+        </button>
 
-      <div className="relative z-10 flex w-full flex-col items-center">
-        <div className="mb-12 flex w-full max-w-4xl items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold">Administración</h1>
-            <p className="mt-2 text-sm text-gray-400">
-              Sesión iniciada como <span className="text-white">{usuario.nombre}</span> · {usuario.cargo}
-            </p>
-          </div>
+        <h1 className="text-3xl font-bold">Administración</h1>
 
-          <button
-            onClick={onVolver}
-            className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white transition hover:bg-white/10"
-          >
-            <ArrowLeft size={18} />
-            Volver
-          </button>
-        </div>
+        {/* Espaciador invisible del mismo ancho aproximado que el botón
+            de la izquierda, para que el título quede centrado — mismo
+            truco de layout que usa Notas con su botón "Nueva nota". */}
+        <div className="w-[92px]" aria-hidden="true" />
+      </div>
 
-        <div className="grid w-full max-w-4xl grid-cols-1 gap-6 sm:grid-cols-2">
-          {secciones.map(({ nombre, icon: Icon, color }) => {
-            const clases = COLOR_CLASSES[color];
-            return (
-              <button
-                key={nombre}
-                onClick={() => handleAbrirSeccion(nombre)}
-                className={`group flex h-40 flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-4 text-center backdrop-blur-2xl shadow-xl transition-all duration-300 hover:scale-105 hover:bg-white/15 ${clases.border}`}
-              >
-                <div
-                  className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-transform duration-300 group-hover:scale-110 ${clases.bg} ${clases.text}`}
-                >
-                  <Icon size={26} />
-                </div>
-                <p className="font-semibold text-white">{nombre}</p>
-              </button>
-            );
-          })}
-        </div>
+      <div className="mt-2 flex w-full max-w-2xl flex-col gap-4">
+        {secciones.map(({ nombre, icon: Icon, color }) => {
+          const clases = COLOR_CLASSES[color];
+          return (
+            <button
+              key={nombre}
+              onClick={() => handleAbrirSeccion(nombre)}
+              className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-left transition hover:bg-white/10"
+            >
+              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${clases.bg} ${clases.text}`}>
+                <Icon size={20} />
+              </div>
+              <p className="flex-1 font-semibold text-white">{nombre}</p>
+              <ChevronRight size={18} className="text-gray-500" />
+            </button>
+          );
+        })}
       </div>
 
       <CobrarParrilleros

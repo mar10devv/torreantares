@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { X, Check, Ban, CircleDollarSign, Sun, Moon, Clock, TriangleAlert } from "lucide-react";
+import {
+  X,
+  Check,
+  Ban,
+  CircleDollarSign,
+  Sun,
+  Moon,
+  Clock,
+  TriangleAlert,
+  CalendarDays,
+  MapPin,
+} from "lucide-react";
 
 export type Turno = "mediodia" | "noche";
 export type Ubicacion = "interior" | "exterior";
@@ -253,9 +264,21 @@ function AvisoModal({ mensaje, onCerrar }: { mensaje: string; onCerrar: () => vo
   );
 }
 
-function SlotDetailPanel({
+// Antes esto era un panel que se desplegaba inline, debajo de los dos
+// botones de "Parrillero 1 / Parrillero 2", dentro del mismo modal — daba
+// la sensación de que el modal "crecía" en vez de abrir algo nuevo, y no
+// mostraba ningún contexto (día, turno, ubicación, precio), obligando a
+// adivinar o volver a mirar atrás. Ahora es su propio modal, más grande,
+// con una franja de contexto arriba (fecha · turno · ubicación) y el
+// precio destacado, para que quede claro qué se está por cobrar sin tener
+// que salir de acá. La lógica interna (reservar, marcar pagado, cancelar
+// con motivo obligatorio) es exactamente la misma que tenía el panel viejo.
+function SlotDetailModal({
   parrillero,
+  fecha,
+  ubicacion,
   turno,
+  horario,
   precio,
   reserva,
   usuario,
@@ -265,7 +288,10 @@ function SlotDetailPanel({
   onCerrar,
 }: {
   parrillero: 1 | 2;
+  fecha: string;
+  ubicacion: Ubicacion;
   turno: Turno;
+  horario: string;
   precio: number;
   reserva: ReservaParrillero | undefined;
   usuario: Usuario;
@@ -289,6 +315,9 @@ function SlotDetailPanel({
   const [motivo, setMotivo] = useState("");
   const [mostrarAvisoMotivo, setMostrarAvisoMotivo] = useState(false);
 
+  const infoTurno = TURNOS.find((t) => t.key === turno)!;
+  const infoUbicacion = UBICACIONES.find((u) => u.key === ubicacion)!;
+
   const handleConfirmar = () => {
     if (!unidad.trim() || !nombreCliente.trim()) return;
     onReservar(parrillero, turno, unidad.trim(), nombreCliente.trim(), emailCliente.trim(), pagado);
@@ -311,188 +340,256 @@ function SlotDetailPanel({
     onCerrar();
   };
 
-  const estilos = reserva
-    ? reserva.pagado
-      ? "border-red-500/30 bg-red-500/[0.05]"
-      : "border-amber-500/30 bg-amber-500/[0.05]"
-    : "border-emerald-500/25 bg-emerald-500/[0.04]";
-
   return (
-    <>
-    <div className={`rounded-xl border p-4 ${estilos}`}>
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Parrillero {parrillero}
-      </p>
-
-      {reserva ? (
-        modo === "cancelar" ? (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-gray-400">
-              Unidad {reserva.unidad}
-              {reserva.pagado && ` · se debe devolver ${formatearImporte(reserva.importe)}`}. Esto cierra la
-              reserva y deja el motivo registrado en una nota firmada por vos.
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+      onClick={onCerrar}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-white/10 bg-[#171b22]/95 shadow-2xl backdrop-blur-2xl"
+      >
+        {/* Encabezado */}
+        <div className="flex items-start justify-between border-b border-white/5 px-7 pb-5 pt-7">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+              Parrillero {parrillero}
             </p>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-400">
-                Motivo <span className="text-red-400">· obligatorio</span>
-              </label>
-              <textarea
-                autoFocus
-                value={motivo}
-                onChange={(e) => setMotivo(e.target.value)}
-                placeholder="Ej: Se canceló por lluvia"
-                rows={3}
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setModo("detalle");
-                  setMotivo("");
-                }}
-                className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-white transition hover:bg-white/10"
-              >
-                Volver
-              </button>
-              <button
-                onClick={handleConfirmarCancelacion}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-500"
-              >
-                <Check size={14} />
-                Confirmar cancelación
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-bold text-white">Unidad {reserva.unidad}</span>
-              {reserva.pagado ? (
-                <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-medium text-red-400">
-                  Pagado
-                </span>
-              ) : (
-                <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-400">
-                  Pendiente de pago
-                </span>
-              )}
-            </div>
-
-            <p className="text-sm text-gray-300">{reserva.nombreCliente}</p>
-            {reserva.emailCliente && (
-              <p className="text-xs text-gray-500">{reserva.emailCliente}</p>
-            )}
-
-            <p className="text-xs text-gray-400">
-              Importe <span className="text-gray-200">{formatearImporte(reserva.importe)}</span>
-            </p>
-
-            <p className="text-xs text-gray-400">
-              Registrado por <span className="text-gray-300">{reserva.autor}</span> · {formatearHora(reserva.fechaCreacion)}
-            </p>
-
-            <div className="mt-2 flex gap-2">
-              {!reserva.pagado && (
-                <button
-                  onClick={() => onTogglePagado(reserva.id)}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
-                >
-                  <CircleDollarSign size={14} />
-                  Marcar pagado
-                </button>
-              )}
-              <button
-                onClick={() => setModo("cancelar")}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400 transition hover:bg-red-500/20"
-              >
-                <Ban size={14} />
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          <input
-            autoFocus
-            type="text"
-            value={nombreCliente}
-            onChange={(e) => setNombreCliente(e.target.value)}
-            placeholder="Nombre del inquilino"
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
-          />
-
-          <input
-            type="text"
-            value={unidad}
-            onChange={(e) => setUnidad(e.target.value)}
-            placeholder="Número de apartamento"
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
-          />
-
-          <input
-            type="email"
-            value={emailCliente}
-            onChange={(e) => setEmailCliente(e.target.value)}
-            placeholder="Mail (para enviarle la boleta)"
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
-          />
-
-          <div className="flex rounded-lg border border-white/10 bg-white/5 p-1">
-            <button
-              type="button"
-              onClick={() => setPagado(false)}
-              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-                !pagado ? "bg-amber-500/20 text-amber-300" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Se debe cobrar
-            </button>
-            <button
-              type="button"
-              onClick={() => setPagado(true)}
-              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-                pagado ? "bg-red-500/20 text-red-300" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Pago
-            </button>
+            <h2 className="mt-1 text-2xl font-bold text-white">
+              {reserva ? `Unidad ${reserva.unidad}` : "Nueva reserva"}
+            </h2>
           </div>
 
-          <p className="text-xs text-gray-500">
-            Importe: <span className="text-gray-300">{formatearImporte(precio)}</span> · Firma:{" "}
-            <span className="text-gray-300">{usuario.nombre}</span>
-          </p>
-
-          <div className="flex gap-2">
-            <button
-              onClick={onCerrar}
-              className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-white transition hover:bg-white/10"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleConfirmar}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500"
-            >
-              <Check size={14} />
-              Confirmar
-            </button>
-          </div>
+          <button
+            onClick={onCerrar}
+            className="shrink-0 rounded-full p-2 transition hover:bg-white/10"
+          >
+            <X className="text-white" size={20} />
+          </button>
         </div>
+
+        <div className="px-7 py-6">
+          {/* Franja de contexto: fecha, turno y ubicación de un vistazo,
+              sin tener que volver al modal anterior para recordarlas. */}
+          <div className="mb-4 flex flex-wrap gap-2">
+            <span className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium capitalize text-gray-300">
+              <CalendarDays size={14} className="text-gray-400" />
+              {formatearFechaTitulo(fecha)}
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-300">
+              <infoTurno.Icon size={14} className="text-gray-400" />
+              {infoTurno.label} · {horario}
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-300">
+              <MapPin size={14} className="text-gray-400" />
+              {infoUbicacion.label}
+            </span>
+          </div>
+
+          {/* Precio destacado — mismo lenguaje visual que la card de
+              precio del modal de fecha, para mantener consistencia. */}
+          <div className="mb-6 flex items-center gap-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.07] px-5 py-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
+              <CircleDollarSign size={22} />
+            </div>
+            <div>
+              <p className="text-xs font-medium text-emerald-300/80">Precio del parrillero</p>
+              <p className="text-3xl font-bold leading-tight text-white">
+                {formatearImporte(reserva ? reserva.importe : precio)}
+              </p>
+            </div>
+          </div>
+
+          {reserva ? (
+            modo === "cancelar" ? (
+              <div className="flex flex-col gap-4">
+                <p className="text-sm leading-relaxed text-gray-400">
+                  Unidad {reserva.unidad}
+                  {reserva.pagado && ` · se debe devolver ${formatearImporte(reserva.importe)}`}. Esto cierra la
+                  reserva y deja el motivo registrado en una nota firmada por vos.
+                </p>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-400">
+                    Motivo <span className="text-red-400">· obligatorio</span>
+                  </label>
+                  <textarea
+                    autoFocus
+                    value={motivo}
+                    onChange={(e) => setMotivo(e.target.value)}
+                    placeholder="Ej: Se canceló por lluvia"
+                    rows={4}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={() => {
+                      setModo("detalle");
+                      setMotivo("");
+                    }}
+                    className="flex-1 rounded-xl border border-white/10 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                  >
+                    Volver
+                  </button>
+                  <button
+                    onClick={handleConfirmarCancelacion}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
+                  >
+                    <Check size={16} />
+                    Confirmar cancelación
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-5">
+                <div className="flex items-center gap-2">
+                  {reserva.pagado ? (
+                    <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-medium text-red-400">
+                      Pagado
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-400">
+                      Pendiente de pago
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Inquilino</p>
+                    <p className="mt-0.5 text-sm text-gray-200">{reserva.nombreCliente}</p>
+                  </div>
+                  {reserva.emailCliente && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500">Mail</p>
+                      <p className="mt-0.5 truncate text-sm text-gray-200">{reserva.emailCliente}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Registrado por</p>
+                    <p className="mt-0.5 text-sm text-gray-200">{reserva.autor}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Fecha de registro</p>
+                    <p className="mt-0.5 text-sm text-gray-200">{formatearHora(reserva.fechaCreacion)}</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  {!reserva.pagado && (
+                    <button
+                      onClick={() => onTogglePagado(reserva.id)}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                    >
+                      <CircleDollarSign size={16} />
+                      Marcar pagado
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setModo("cancelar")}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
+                  >
+                    <Ban size={16} />
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-400">Nombre del inquilino</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={nombreCliente}
+                  onChange={(e) => setNombreCliente(e.target.value)}
+                  placeholder="Ej: Martín Pérez"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-400">Número de apartamento</label>
+                  <input
+                    type="text"
+                    value={unidad}
+                    onChange={(e) => setUnidad(e.target.value)}
+                    placeholder="Ej: 1015"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-400">Mail (opcional)</label>
+                  <input
+                    type="email"
+                    value={emailCliente}
+                    onChange={(e) => setEmailCliente(e.target.value)}
+                    placeholder="Para enviarle la boleta"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-500 focus:outline-2 focus:outline-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-400">Estado del pago</label>
+                <div className="flex rounded-xl border border-white/10 bg-white/5 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setPagado(false)}
+                    className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition ${
+                      !pagado ? "bg-amber-500/20 text-amber-300" : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    Se debe cobrar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPagado(true)}
+                    className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition ${
+                      pagado ? "bg-red-500/20 text-red-300" : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    Pago
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Firma: <span className="text-gray-300">{usuario.nombre}</span>
+              </p>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={onCerrar}
+                  className="flex-1 rounded-xl border border-white/10 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmar}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                >
+                  <Check size={16} />
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {mostrarAvisoMotivo && (
+        <AvisoModal
+          mensaje="Tenés que indicar un motivo para cancelar la reserva."
+          onCerrar={() => setMostrarAvisoMotivo(false)}
+        />
       )}
     </div>
-
-    {mostrarAvisoMotivo && (
-      <AvisoModal
-        mensaje="Tenés que indicar un motivo para cancelar la reserva."
-        onCerrar={() => setMostrarAvisoMotivo(false)}
-      />
-    )}
-    </>
   );
 }
 
@@ -640,23 +737,24 @@ export default function DayGrillModal({
             </div>
           ))}
         </div>
-
-        {parrilleroSeleccionado !== null && (
-          <div className="mt-4">
-            <SlotDetailPanel
-              parrillero={parrilleroSeleccionado}
-              turno={turnoSeleccionado}
-              precio={precio}
-              reserva={buscarReserva(parrilleroSeleccionado, turnoSeleccionado)}
-              usuario={usuario}
-              onReservar={onReservar}
-              onTogglePagado={onTogglePagado}
-              onCancelar={onCancelar}
-              onCerrar={() => setParrilleroSeleccionado(null)}
-            />
-          </div>
-        )}
       </div>
+
+      {parrilleroSeleccionado !== null && (
+        <SlotDetailModal
+          parrillero={parrilleroSeleccionado}
+          fecha={fecha}
+          ubicacion={ubicacion}
+          turno={turnoSeleccionado}
+          horario={horario}
+          precio={precio}
+          reserva={buscarReserva(parrilleroSeleccionado, turnoSeleccionado)}
+          usuario={usuario}
+          onReservar={onReservar}
+          onTogglePagado={onTogglePagado}
+          onCancelar={onCancelar}
+          onCerrar={() => setParrilleroSeleccionado(null)}
+        />
+      )}
     </div>
   );
 }

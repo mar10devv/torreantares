@@ -14,6 +14,7 @@ import {
   orderBy,
   runTransaction,
 } from "firebase/firestore";
+import { obtenerFinDeUso } from "../components/DayGrillModal"; // ajustá el path si tu carpeta es distinta
 
 const firebaseConfig = {
   apiKey: "AIzaSyAOc4U1rdwCc-tYZBq0rmNFAp3kXEYvev0",
@@ -452,4 +453,47 @@ export async function obtenerFacturasDeDB() {
 export async function actualizarFacturaEnDB(facturaId, cambios) {
   const facturaRef = doc(db, "facturas", facturaId);
   await updateDoc(facturaRef, limpiarUndefined(cambios));
+}
+
+// Revisa las reservas de parrillero PAGADAS y NO CANCELADAS que todavía no
+// generaron su factura ("facturada" != true), y crea la factura de las que
+// ya pasaron su fin de uso + 1 hora de margen (ver obtenerFinDeUso en
+// DayGrillModal.tsx). Se llama al abrir Facturas.tsx, antes de traer la
+// lista — así la pantalla siempre muestra el estado más actualizado.
+export async function generarFacturasPendientes() {
+  const snapshot = await getDocs(collection(db, "parrilleros"));
+  const ahora = new Date();
+
+  const candidatas = snapshot.docs.filter((d) => {
+    const r = d.data();
+    return r.pagado && !r.cancelada && !r.facturada;
+  });
+
+  for (const d of candidatas) {
+    const r = d.data();
+    const finDeUso = obtenerFinDeUso(r.fecha, r.turno);
+    const limite = new Date(finDeUso.getTime() + 60 * 60 * 1000); // +1hr de margen
+
+    if (ahora < limite) continue; // todavía no pasó el margen, se salta
+
+    const numero = await generarProximoNumeroFacturaEnDB();
+
+    await crearFacturaEnDB({
+      numero: `A${String(numero).padStart(4, "0")}`,
+      titulo: `Fac. Parrillero (${r.fecha})`,
+      fecha: r.fecha,
+      unidad: r.unidad,
+      nombreCliente: r.nombreCliente,
+      emailCliente: r.emailCliente,
+      concepto: `Uso de parrillero ${r.parrillero} - ${r.turno === "noche" ? "Noche" : "Día"}`,
+      importe: r.importe,
+      reservaId: d.id,
+      estado: "nueva",
+      pagado: true,
+      autor: r.autor,
+      fechaCreacion: new Date().toISOString(),
+    });
+
+    await updateDoc(doc(db, "parrilleros", d.id), { facturada: true });
+  }
 }
