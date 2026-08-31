@@ -56,10 +56,12 @@ export interface Ingreso {
   importeUte?: number;
   cancelado?: boolean;
   motivoCancelacion?: string;
-  /** id del contacto que se creó automáticamente en Contactos al registrar este ingreso. */
+    /** id del contacto que se creó automáticamente en Contactos al registrar este ingreso. */
   contactoRegistradoId?: string;
   /** id del vehículo que se creó automáticamente en Cocheras (solo si se cargó matrícula). */
   vehiculoRegistradoId?: string;
+  /** true = ya se le generó la factura correspondiente (ver generarFacturasPendientesDeIngresos en lib/firebase.ts). */
+  facturada?: boolean;
 }
 
 interface Usuario {

@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Receipt, Download, X, Loader2 } from "lucide-react";
 import logo from "../assets/logo.png";
-import { obtenerFacturasDeDB, actualizarFacturaEnDB, generarFacturasPendientes } from "../lib/firebase";
+import {
+  obtenerFacturasDeDB,
+  actualizarFacturaEnDB,
+  generarFacturasPendientes,
+  generarFacturasPendientesDeIngresos,
+} from "../lib/firebase";
 
 // --------------------------------------------------------------------
 // CONFIGURACIÓN DE FACTURACIÓN — único lugar a tocar cuando llegue el
@@ -21,14 +26,20 @@ export const CONFIG_FACTURA = {
 export interface Factura {
   id: string;
   numero: string; // "A0001", "A0002"...
-  titulo: string; // "Fac. Parrillero (30/08/2026)"
+  titulo: string; // "Fac. Parrillero (30/08/2026)" o "Fac. Ingreso (30/08/2026)"
   fecha: string; // fecha de uso, YYYY-MM-DD
   unidad: string;
   nombreCliente: string;
   emailCliente: string;
   concepto: string;
   importe: number;
-  reservaId: string;
+  reservaId?: string; // presente si la factura viene de un parrillero
+  ingresoId?: string; // presente si la factura viene de un ingreso
+  // Solo tienen sentido en facturas de ingreso, y solo si tomaConsumoUte
+  // era true — igual el bloque de UTE siempre se imprime en la factura,
+  // vacío si estos dos no están definidos (ver FacturaDocumento).
+  lecturaUteEntrada?: number;
+  lecturaUteSalida?: number;
   estado: "nueva" | "vista"; // controla el color de la card (no confundir con "pagado")
   pagado: boolean;
   formaPago?: string; // "Efectivo", "Transferencia", etc.
@@ -158,6 +169,26 @@ function FacturaDocumento({ factura }: { factura: Factura }) {
         />
         <div style={{ borderTop: "1px solid #9ca3af", margin: "6px 0 10px 0" }} />
         <Fila izquierda={<span>{factura.concepto}</span>} derecha={<span>{formatearImporte(factura.importe)}</span>} />
+      </div>
+
+      <div style={estiloDivider} />
+
+      {/* Consumo de UTE — este bloque siempre se imprime, tenga o no
+          datos. Si los campos vienen vacíos, se entiende que no se pidió
+          tomar consumo en esa estadía; no es un error, es la norma. Las
+          facturas de parrillero (que nunca tienen estos campos) también
+          muestran este bloque, vacío. */}
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "4px" }}>
+        <p style={estiloSeccionTitulo}>CONSUMO DE UTE</p>
+        <div style={{ height: "4px" }} />
+        <Fila
+          izquierda={<span>Lectura de entrada</span>}
+          derecha={<span>{factura.lecturaUteEntrada ?? ""}</span>}
+        />
+        <Fila
+          izquierda={<span>Lectura de salida</span>}
+          derecha={<span>{factura.lecturaUteSalida ?? ""}</span>}
+        />
       </div>
 
       <div style={estiloDivider} />
@@ -297,14 +328,22 @@ export default function Facturas({ usuario, onVolver, onListo }: FacturasProps) 
 
   useEffect(() => {
     (async () => {
-      // Antes de traer la lista, revisa si hay reservas pagadas cuyo uso
-      // + 1hr de margen ya pasó, y les genera la factura correspondiente
-      // (ver generarFacturasPendientes en lib/firebase.ts).
+      // Antes de traer la lista, revisa si hay reservas pagadas o ingresos
+      // finalizados cuyo margen de espera ya pasó (1hr parrilleros, 2hrs
+      // ingresos), y les genera la factura correspondiente (ver
+      // generarFacturasPendientes / generarFacturasPendientesDeIngresos en
+      // lib/firebase.ts). Cada una tiene su propio try/catch: si una
+      // falla, la otra igual corre y las facturas ya existentes se
+      // muestran igual.
       try {
         await generarFacturasPendientes();
       } catch (err) {
-        console.error("Error al generar facturas pendientes:", err);
-        // No cortamos el flujo: igual mostramos las facturas que ya existan.
+        console.error("Error al generar facturas pendientes de parrilleros:", err);
+      }
+      try {
+        await generarFacturasPendientesDeIngresos();
+      } catch (err) {
+        console.error("Error al generar facturas pendientes de ingresos:", err);
       }
       await cargarFacturas();
       onListo?.();

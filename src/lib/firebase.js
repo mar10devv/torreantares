@@ -198,6 +198,10 @@ export async function agregarComentarioEnDB(notaId, { contenido, autor }) {
     }),
   });
 }
+// Elimina una nota (solo debería llamarse desde la UI si el usuario tiene accesoAdministracion)
+export async function eliminarNotaEnDB(notaId) {
+  await deleteDoc(doc(db, "notas", notaId));
+}
 
 // Crea una reserva de parrillero nueva en la colección "parrilleros"
 export async function crearReservaParrilleroEnDB(reserva) {
@@ -495,5 +499,52 @@ export async function generarFacturasPendientes() {
     });
 
     await updateDoc(doc(db, "parrilleros", d.id), { facturada: true });
+  }
+}
+// Revisa los ingresos FINALIZADOS y NO CANCELADOS que todavía no generaron
+// su factura ("facturada" != true), y crea la factura de los que ya
+// pasaron su fechaFinalizacion + 2 horas de margen (tiempo para que se
+// pueda cancelar la estadía si el depto se encontró en mal estado). Se
+// llama al abrir Facturas.tsx, junto a generarFacturasPendientes().
+//
+// A diferencia de Parrilleros, acá NO hay cobro de alquiler/estadía: la
+// factura documenta el ingreso en sí y, si correspondía tomar consumo de
+// luz (tomaConsumoUte), incluye lectura de entrada, salida e importe. Si
+// no correspondía tomar consumo, esos campos quedan sin definir — el
+// bloque de UTE igual se imprime en la factura, pero en blanco (eso lo
+// resuelve Facturas.tsx, no esta función).
+export async function generarFacturasPendientesDeIngresos() {
+  const snapshot = await getDocs(collection(db, "ingresos"));
+  const ahora = new Date();
+
+  const candidatos = snapshot.docs.filter((d) => {
+    const i = d.data();
+    return i.finalizado && !i.cancelado && !i.facturada;
+  });
+
+   for (const d of candidatos) {
+    const i = d.data();
+
+    const numero = await generarProximoNumeroFacturaEnDB();
+
+    await crearFacturaEnDB({
+      numero: `A${String(numero).padStart(4, "0")}`,
+      titulo: `Fac. Ingreso (${i.fechaIngreso})`,
+      fecha: i.fechaIngreso,
+      unidad: i.apartamento,
+      nombreCliente: i.nombre,
+      emailCliente: i.email,
+      concepto: "Consumo de UTE",
+      importe: i.tomaConsumoUte ? (i.importeUte ?? 0) : 0,
+      lecturaUteEntrada: i.tomaConsumoUte ? i.lecturaUteEntrada : undefined,
+      lecturaUteSalida: i.tomaConsumoUte ? i.lecturaUteSalida : undefined,
+      ingresoId: d.id,
+      estado: "nueva",
+      pagado: false,
+      autor: i.autor,
+      fechaCreacion: new Date().toISOString(),
+    });
+
+    await updateDoc(doc(db, "ingresos", d.id), { facturada: true });
   }
 }

@@ -9,6 +9,7 @@ import {
   buscarNotasPorPalabrasClaveDeDB,
   palabrasParaBuscar,
   agregarComentarioEnDB,
+  eliminarNotaEnDB, // 👈 nuevo
 } from "../lib/firebase";
 
 interface Usuario {
@@ -17,6 +18,7 @@ interface Usuario {
   gmail: string;
   telefono: string;
   contrasena: string;
+  accesoAdministracion?: boolean;
 }
 
 interface Comentario {
@@ -241,6 +243,19 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
     }
   };
 
+  const esAdmin = usuario.accesoAdministracion === true;
+
+  const handleEliminarNota = async (notaId: string) => {
+    if (!esAdmin) return; // por las dudas, defensa extra en el cliente
+    try {
+      await eliminarNotaEnDB(notaId);
+      await recargarVistaActual();
+    } catch (err) {
+      console.error("Error al eliminar nota en Firestore:", err);
+      setErrorNotas("No se pudo eliminar la nota. Intentá de nuevo.");
+    }
+  };
+
   const cambiarMes = (delta: number) => {
     setMesSeleccionado((prev) => {
       const nuevaFecha = new Date(prev.anio, prev.mes + delta, 1);
@@ -377,12 +392,14 @@ export default function Notas({ usuario, onVolver, onListo }: NotasProps) {
 
             {notasVisibles.map((nota) => (
               <NoteCard
-                key={nota.id}
-                nota={nota}
-                esNueva={notasNuevasIds.has(nota.id)}
-                formatearFecha={formatearFecha}
-                onAddComment={(contenido) => handleAddComment(nota.id, contenido)}
-              />
+  key={nota.id}
+  nota={nota}
+  esNueva={notasNuevasIds.has(nota.id)}
+  formatearFecha={formatearFecha}
+  onAddComment={(contenido) => handleAddComment(nota.id, contenido)}
+  puedeBorrar={esAdmin}                              // 👈 nuevo
+  onDelete={() => handleEliminarNota(nota.id)}        // 👈 nuevo
+/>
             ))}
           </>
         )}

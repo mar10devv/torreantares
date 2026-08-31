@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageSquarePlus, Send } from "lucide-react";
+import { MessageSquarePlus, Send, Trash2 } from "lucide-react";
 
 interface Comentario {
   contenido: string;
@@ -19,6 +19,8 @@ interface NoteCardProps {
   onAddComment: (contenido: string) => void;
   formatearFecha: (iso: string) => string;
   esNueva?: boolean;
+  puedeBorrar?: boolean;
+  onDelete?: () => void;
 }
 
 // Genera un color de acento estable a partir del nombre, así cada persona
@@ -86,9 +88,39 @@ function ContenidoTexto({ contenido }: { contenido: string }) {
   return <p className="text-[15px] leading-snug">{contenido}</p>;
 }
 
-export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }: NoteCardProps) {
+// Modal de confirmación propio (reemplaza al confirm() nativo del navegador,
+// que rompe con el estilo oscuro del resto de la app).
+function ConfirmarEliminarModal({ onConfirmar, onCancelar }: { onConfirmar: () => void; onCancelar: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1a2129] p-5 shadow-xl">
+        <h2 className="text-base font-semibold text-white">Eliminar nota</h2>
+        <p className="mt-2 text-sm text-gray-400">
+          ¿Seguro que querés eliminar esta nota? Esta acción no se puede deshacer.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onCancelar}
+            className="rounded-xl border border-white/10 px-4 py-2 text-sm font-medium text-gray-200 transition hover:bg-white/10"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirmar}
+            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+          >
+            Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva, puedeBorrar, onDelete }: NoteCardProps) {
   const [comentario, setComentario] = useState("");
   const [mostrarInput, setMostrarInput] = useState(false);
+  const [mostrarConfirmar, setMostrarConfirmar] = useState(false);
 
   const handleEnviar = () => {
     if (!comentario.trim()) return;
@@ -101,6 +133,11 @@ export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }
     if (e.key === "Enter") {
       handleEnviar();
     }
+  };
+
+  const handleConfirmarEliminar = () => {
+    setMostrarConfirmar(false);
+    onDelete?.();
   };
 
   return (
@@ -124,6 +161,15 @@ export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }
             <span className="mt-0.5 shrink-0 whitespace-nowrap rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-300">
               Nuevo
             </span>
+          )}
+          {puedeBorrar && (
+            <button
+              onClick={() => setMostrarConfirmar(true)}
+              title="Eliminar nota"
+              className="mt-0.5 shrink-0 text-gray-500 transition hover:text-red-400"
+            >
+              <Trash2 size={15} />
+            </button>
           )}
         </div>
         <p className="mt-1 text-right text-[11px] text-gray-400">{formatearFecha(nota.fecha)}</p>
@@ -180,6 +226,13 @@ export default function NoteCard({ nota, onAddComment, formatearFecha, esNueva }
           )}
         </div>
       </div>
+
+      {mostrarConfirmar && (
+        <ConfirmarEliminarModal
+          onConfirmar={handleConfirmarEliminar}
+          onCancelar={() => setMostrarConfirmar(false)}
+        />
+      )}
     </div>
   );
 }
