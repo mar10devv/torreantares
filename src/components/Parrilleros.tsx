@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import DayGrillModal, { PRECIOS } from "./DayGrillModal";
 import type { ReservaParrillero, Turno, Ubicacion } from "./DayGrillModal";
+import PlanillaParrilleroModal from "./PlanillaParrillero";
+
 import {
   crearReservaParrilleroEnDB,
   obtenerReservasParrilleroDeDB,
@@ -15,6 +17,7 @@ interface Usuario {
   gmail: string;
   telefono: string;
   contrasena: string;
+  accesoAdministracion?: boolean;
 }
 
 interface ParrillerosProps {
@@ -46,6 +49,24 @@ function esPasado(anio: number, mes: number, dia: number) {
   return fecha < hoy;
 }
 
+// Un mes se considera "vencido" recién cuando terminó por completo (el
+// último instante de su último día ya quedó atrás). Solo un mes vencido
+// habilita la DESCARGA del PDF (ver PlanillaParrilleroModal).
+function esMesVencido(anio: number, mes: number) {
+  const finDeMes = new Date(anio, mes + 1, 0);
+  finDeMes.setHours(23, 59, 59, 999);
+  return finDeMes < new Date();
+}
+
+// El mes que se está viendo es el mes calendario en curso ahora mismo.
+// Sirve para mostrar el botón de planilla en modo "solo preview" mientras
+// el mes todavía no cerró (útil también para probar que la planilla se ve
+// bien sin tener que esperar a que termine el mes).
+function esMesEnCurso(anio: number, mes: number) {
+  const hoy = new Date();
+  return anio === hoy.getFullYear() && mes === hoy.getMonth();
+}
+
 export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosProps) {
   const [ubicacion, setUbicacion] = useState<Ubicacion>("interior");
   const [mesActual, setMesActual] = useState(() => {
@@ -53,6 +74,7 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
     return { anio: hoy.getFullYear(), mes: hoy.getMonth() };
   });
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
+  const [mostrarPlanilla, setMostrarPlanilla] = useState(false);
 
   // Las reservas ahora viven en Firestore, no en localStorage.
   const [reservas, setReservas] = useState<ReservaParrillero[]>([]);
@@ -190,6 +212,23 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
     ? reservas.filter((r) => r.fecha === diaSeleccionado && r.ubicacion === ubicacion)
     : [];
 
+  const mesVencido = esMesVencido(anio, mes);
+  const mesEnCurso = esMesEnCurso(anio, mes);
+
+  const hayReservasEsteMesUbicacion = reservas.some((r) => {
+    if (r.ubicacion !== ubicacion || r.cancelada) return false;
+    const [a, m] = r.fecha.split("-").map(Number);
+    return a === anio && m - 1 === mes;
+  });
+
+    const esAdmin = usuario.accesoAdministracion === true;
+
+  // El botón aparece si el mes ya cerró (y tuvo uso), o si es el mes en
+  // curso (para poder previsualizar la planilla sin esperar a que
+  // termine; la descarga real igual queda bloqueada hasta que venza).
+  // Además, solo lo ven los usuarios con acceso a administración.
+  const mostrarBotonPlanilla = esAdmin && ((mesVencido && hayReservasEsteMesUbicacion) || mesEnCurso);
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-[#0d1117] px-4 py-12 text-white sm:px-6 sm:py-16">
 
@@ -231,23 +270,42 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
         </button>
       </div>
 
-      {/* Navegación de mes */}
-      <div className="mb-6 flex items-center gap-4">
-        <button
-          onClick={() => cambiarMes(-1)}
-          className="rounded-lg border border-white/10 p-2 transition hover:bg-white/10"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <p className="w-40 text-center text-lg font-semibold capitalize">
-          {MESES[mes]} {anio}
-        </p>
-        <button
-          onClick={() => cambiarMes(1)}
-          className="rounded-lg border border-white/10 p-2 transition hover:bg-white/10"
-        >
-          <ChevronRight size={18} />
-        </button>
+            {/* Navegación de mes + botón de planilla en la misma fila.
+          El botón de planilla aparece en meses vencidos con uso, o en el
+          mes en curso (ahí solo sirve de preview; la descarga queda
+          bloqueada hasta que el mes cierre — ver PlanillaParrilleroModal). */}
+      <div className="mb-6 flex w-full max-w-3xl items-center justify-between">
+        <div className="w-[180px]" />
+
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => cambiarMes(-1)}
+            className="rounded-lg border border-white/10 p-2 transition hover:bg-white/10"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <p className="w-40 text-center text-lg font-semibold capitalize">
+            {MESES[mes]} {anio}
+          </p>
+          <button
+            onClick={() => cambiarMes(1)}
+            className="rounded-lg border border-white/10 p-2 transition hover:bg-white/10"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        <div className="flex w-[180px] justify-end">
+          {mostrarBotonPlanilla && (
+            <button
+              onClick={() => setMostrarPlanilla(true)}
+              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+            >
+              <Download size={16} />
+              Descargar planilla
+            </button>
+          )}
+        </div>
       </div>
 
       {cargandoReservas ? (
@@ -341,6 +399,17 @@ export default function Parrilleros({ usuario, onVolver, onListo }: ParrillerosP
           onReservar={handleReservar}
           onTogglePagado={handleTogglePagado}
           onCancelar={handleCancelar}
+        />
+      )}
+
+      {mostrarPlanilla && (
+        <PlanillaParrilleroModal
+          reservas={reservas}
+          ubicacion={ubicacion}
+          anio={anio}
+          mes={mes}
+          puedeDescargar={mesVencido}
+          onClose={() => setMostrarPlanilla(false)}
         />
       )}
     </main>
