@@ -93,7 +93,7 @@ export type NuevoIngresoData = Omit<
   | "vehiculoRegistradoId"
 >;
 
-const OCUPACION_LABEL: Record<Ocupacion, string> = {
+export const OCUPACION_LABEL: Record<Ocupacion, string> = {
   inquilino: "Inquilino",
   invitado: "Invitado",
   propietario: "Propietario",

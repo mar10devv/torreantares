@@ -415,12 +415,16 @@ export async function eliminarControlTagEnDB(registroId) {
 }
 
 /* ---------------------------------------------------------- */
-/* Facturas                                                      */
+/* Facturas (generales — Parrilleros y, a futuro, Controles/Tags) */
 /* ---------------------------------------------------------- */
 // Cada factura queda vinculada a la reserva de parrillero que la generó
 // (reservaId). La numeración (ej. "A0001") se genera con una transacción
 // atómica sobre un documento contador aparte, para que dos reservas
 // creadas casi al mismo tiempo nunca terminen con el mismo número.
+//
+// Esta colección ("facturas") es completamente independiente de
+// "facturasIngresos" (ver más abajo) — distinto contador, distinto
+// prefijo, nunca se mezclan.
 
 // Genera el próximo número de factura de forma atómica (evita duplicados
 // con alta concurrencia). Devuelve solo el entero — el formato "A0001" se
@@ -501,43 +505,87 @@ export async function generarFacturasPendientes() {
     await updateDoc(doc(db, "parrilleros", d.id), { facturada: true });
   }
 }
+
+/* ---------------------------------------------------------- */
+/* Facturas de Ingresos (colección y numeración SEPARADAS de     */
+/* "facturas", que es solo para parrilleros/otros)                */
+/* ---------------------------------------------------------- */
+
+// Contador atómico propio, independiente del de "facturas". Los números
+// de ingresos usan prefijo "I" (armado en Facturas.tsx), así nunca se
+// confunden a simple vista con los de parrilleros ("A").
+export async function generarProximoNumeroFacturaIngresoEnDB() {
+  const contadorRef = doc(db, "contadores", "facturasIngresos");
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(contadorRef);
+    const actual = snap.exists() ? snap.data().ultimoNumero : 0;
+    const siguiente = actual + 1;
+    transaction.set(contadorRef, { ultimoNumero: siguiente }, { merge: true });
+    return siguiente;
+  });
+}
+
+// Crea una factura de ingreso en su propia colección "facturasIngresos"
+export async function crearFacturaIngresoEnDB(factura) {
+  const docRef = await addDoc(collection(db, "facturasIngresos"), limpiarUndefined(factura));
+  return docRef.id;
+}
+
+// Trae todas las facturas de ingreso, ordenadas de más nueva a más vieja
+export async function obtenerFacturasIngresosDeDB() {
+  const q = query(collection(db, "facturasIngresos"), orderBy("fechaCreacion", "desc"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+}
+
+// Actualiza campos puntuales de una factura de ingreso (marcarla "vista", etc.)
+export async function actualizarFacturaIngresoEnDB(facturaId, cambios) {
+  const facturaRef = doc(db, "facturasIngresos", facturaId);
+  await updateDoc(facturaRef, limpiarUndefined(cambios));
+}
+
 // Revisa los ingresos FINALIZADOS y NO CANCELADOS que todavía no generaron
-// su factura ("facturada" != true), y crea la factura de los que ya
-// pasaron su fechaFinalizacion + 2 horas de margen (tiempo para que se
-// pueda cancelar la estadía si el depto se encontró en mal estado). Se
-// llama al abrir Facturas.tsx, junto a generarFacturasPendientes().
-//
-// A diferencia de Parrilleros, acá NO hay cobro de alquiler/estadía: la
-// factura documenta el ingreso en sí y, si correspondía tomar consumo de
-// luz (tomaConsumoUte), incluye lectura de entrada, salida e importe. Si
-// no correspondía tomar consumo, esos campos quedan sin definir — el
-// bloque de UTE igual se imprime en la factura, pero en blanco (eso lo
-// resuelve Facturas.tsx, no esta función).
+// su factura ("facturada" != true), y la crea de inmediato — sin margen de
+// espera: el caso de "vino, no le gustó el depto y se fue" ya se cubre con
+// Cancelar (que queda afuera del filtro), no con Finalizar. Guarda todos
+// los datos del inquilino/ocupante, no solo nombre y depto, y siempre
+// deja preparado el bloque de UTE (con o sin lecturas, según
+// tomaConsumoUte) para que Facturas.tsx lo imprima. Va a la colección
+// separada "facturasIngresos", con su propia numeración ("I0001...").
 export async function generarFacturasPendientesDeIngresos() {
   const snapshot = await getDocs(collection(db, "ingresos"));
-  const ahora = new Date();
 
   const candidatos = snapshot.docs.filter((d) => {
     const i = d.data();
     return i.finalizado && !i.cancelado && !i.facturada;
   });
 
-   for (const d of candidatos) {
+  for (const d of candidatos) {
     const i = d.data();
+    const numero = await generarProximoNumeroFacturaIngresoEnDB();
 
-    const numero = await generarProximoNumeroFacturaEnDB();
-
-    await crearFacturaEnDB({
-      numero: `A${String(numero).padStart(4, "0")}`,
+    await crearFacturaIngresoEnDB({
+      numero: `I${String(numero).padStart(4, "0")}`,
       titulo: `Fac. Ingreso (${i.fechaIngreso})`,
       fecha: i.fechaIngreso,
+      fechaSalida: i.fechaSalida,
       unidad: i.apartamento,
       nombreCliente: i.nombre,
       emailCliente: i.email,
-      concepto: "Consumo de UTE",
-      importe: i.tomaConsumoUte ? (i.importeUte ?? 0) : 0,
+      documento: i.documento,
+      telefono: i.telefono,
+      ciudad: i.ciudad,
+      ocupacion: i.ocupacion,
+      auto: i.auto,
+      matricula: i.matricula,
+      tomaConsumoUte: i.tomaConsumoUte,
       lecturaUteEntrada: i.tomaConsumoUte ? i.lecturaUteEntrada : undefined,
       lecturaUteSalida: i.tomaConsumoUte ? i.lecturaUteSalida : undefined,
+      concepto: "Consumo de UTE",
+      importe: i.tomaConsumoUte ? (i.importeUte ?? 0) : 0,
       ingresoId: d.id,
       estado: "nueva",
       pagado: false,
