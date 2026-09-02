@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import AddUserCard from "./AddUserCard";
 import CreateUserModal from "./CreateUserModal";
 import UserCard from "./UserCard";
@@ -306,6 +306,19 @@ export default function Home() {
     setVista("dashboard");
   };
 
+  // Mismo array de usuarios, pero con "Martin" siempre primero dentro
+  // de la lista — como AddUserCard ya va primero en el grid, esto lo
+  // deja fijo en la segunda posición sin importar el orden en que
+  // vengan desde Firestore. El resto conserva su orden original.
+  const usuariosOrdenados = useMemo(() => {
+    const martinIndex = usuarios.findIndex((u) => u.nombre === "Martin");
+    if (martinIndex === -1) return usuarios;
+    const copia = [...usuarios];
+    const [martin] = copia.splice(martinIndex, 1);
+    copia.unshift(martin);
+    return copia;
+  }, [usuarios]);
+
   // cada pantalla llama a esto cuando ya terminó de cargar sus datos.
   // Si todavía no pasó el tiempo mínimo de reproducción, esperamos
   // lo que falte antes de ocultar el loader.
@@ -413,19 +426,34 @@ export default function Home() {
                 ) : errorUsuarios ? (
                   <p className="text-red-400">{errorUsuarios}</p>
                 ) : (
-                  <div className="flex flex-wrap justify-center gap-8">
-
-                    {usuarios.map((usuario, index) => (
-                      <UserCard
-                        key={index}
-                        usuario={usuario}
-                        onEdit={() => handleEditUser(index)}
-                        onDelete={() => handleSolicitarBorrado(index)}
-                        onLogin={() => handleIntentarLogin(usuario)}
-                      />
-                    ))}
+                  // Grid de 4 columnas fijas: la card "Agregar usuario" va
+                  // primero en el JSX (siempre ocupa la primera celda) y
+                  // los usuarios se acomodan después, en orden, wrappeando
+                  // automáticamente cada 4 elementos. Usamos grid en vez de
+                  // flex-wrap porque flex-wrap centra la última fila
+                  // incompleta, lo que rompe la alineación en 4 columnas
+                  // prolijas apenas el total de cards no es múltiplo de 4.
+                  <div className="grid grid-cols-4 gap-8">
 
                     <AddUserCard onClick={handleOpenCreateModal} />
+
+                    {usuariosOrdenados.map((usuario) => {
+                      // Los handlers de editar/borrar trabajan con el índice
+                      // dentro del array original "usuarios" (así funciona
+                      // el resto del componente, ej. usuarios[editingIndex]),
+                      // así que lo recalculamos acá aunque el orden visual
+                      // sea distinto.
+                      const indexReal = usuarios.indexOf(usuario);
+                      return (
+                        <UserCard
+                          key={indexReal}
+                          usuario={usuario}
+                          onEdit={() => handleEditUser(indexReal)}
+                          onDelete={() => handleSolicitarBorrado(indexReal)}
+                          onLogin={() => handleIntentarLogin(usuario)}
+                        />
+                      );
+                    })}
 
                   </div>
                 )}
